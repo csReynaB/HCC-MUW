@@ -24,29 +24,6 @@ extra_features_to_include:
   - "OS months"
 data_types:
   - exist
-prevalence_thresholds_min:
-  - 2.0
-  - 5.0
-  - 10.0
-  - 20.0
-  - 50.0
-prevalence_thresholds_max:
-  - 95.0
-
-# Options for data processing
-with_oligos_options:
-  - true
-  - false
-with_additional_features_options:
-  - true
-  - false
-with_run_plates_options:
-  - false
-filter_by_entropy:
-  - false
-  - true
-filter_by_correlation:
-  - false
 
 # Subgroup settings
 subgroups_to_name:
