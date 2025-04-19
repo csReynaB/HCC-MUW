@@ -7,6 +7,7 @@ import seaborn as sns
 from sklearn.preprocessing import LabelEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
+from skopt.space import Integer, Real
 import xgboost as xgb
 #random forest
 from peptidesFilter import PrevalenceFilter, EntropyFilter, CorrelationFilter
@@ -245,6 +246,22 @@ class Config:
                 if class_str and isinstance(class_str, str):
                     info['estimator_class'] = get_class_from_string(class_str)
 
+    def get_bayesian_param_grid_from_dict_items(self):
+        pg = {}
+        for name, spec in self.param_grid.items():
+            t = spec["type"].lower()
+            if t == "integer":
+                pg[name] = Integer(spec["low"], spec["high"])
+            elif t == "real":
+                pg[name] = Real(
+                    spec["low"],
+                    spec["high"],
+                    prior=spec.get("prior", None)
+                )
+            else:
+                raise ValueError(f"Unknown type {t} for {name}")
+        self.param_grid = pg
+
     def load_from_file(self, config_file):
         with open(config_file, 'r') as f:
             config_data = yaml.safe_load(f)
@@ -281,13 +298,21 @@ class Config:
             raise ValueError(f"{attr_name} must only be [True, False], [True], or [False].")
         setattr(self, attr_name, value)
 
+    @staticmethod
+    def _is_str_or_list_of_str(x):
+        if isinstance(x, str):
+            return True
+        if isinstance(x, list) and all(isinstance(item, str) for item in x):
+            return True
+        return False
+
     def _set_dict_string_attribute(self, attr_name, value):
         if not isinstance(value, dict):
             raise ValueError(f"The attribute '{attr_name}' must be a dictionary.")
 
         # Check if all keys and values are strings
-        if not all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
-            raise ValueError(f"The attribute '{attr_name}' must be a dictionary with string keys and string values.")
+        if not all(isinstance(k, str) and self._is_str_or_list_of_str(v) for k, v in value.items()):
+            raise TypeError(f"The attribute '{attr_name}' must be a dictionary with string keys and string values.")
         setattr(self, attr_name, value)
 
     def _set_list_of_dict_string_attribute(self, attr_name, value):
@@ -561,7 +586,7 @@ class FeatureManager:
             else:
                 self.entropy_threshold = 0.4
         self.prevalence_threshold_min = prevalence_threshold_min if isinstance(prevalence_threshold_min, (int, float, np.integer, np.floating)) else 2.0
-        self.prevalence_threshold_max = prevalence_threshold_max if isinstance(prevalence_threshold_max, (int, float, np.integer, np.floating)) else 95.0
+        self.prevalence_threshold_max = prevalence_threshold_max if isinstance(prevalence_threshold_max, (int, float, np.integer, np.floating)) else 98.0
 
         self.subgroup = subgroup if isinstance(subgroup, str) else 'all'
 

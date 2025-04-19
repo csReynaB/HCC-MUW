@@ -1,6 +1,6 @@
 # mandatory parameters
-metadata_dir: /home/creyna/Vogl-lab_Projects_git/HCC_MUW_analysis/Data/Metadata
-data_dir: /home/creyna/Vogl-lab_Projects_git/HCC_MUW_analysis/Data
+metadata_dir: /home/creyna/Vogl-lab_Projects_git/HCC/Metadata/Classification
+data_dir: /home/creyna/Vogl-lab_Projects_git/HCC/Data/Classification
 lib_meta_data: aligent_twist_with_important_info_excludeSARS.pkl
 project: HCC_MUW
 group_tests:
@@ -10,7 +10,6 @@ group_tests:
 ###
 # filter metadata (optional if not all samples are needed)
 filters_metadata:
-  Centre: Hamburg
   group_test:
     - Controls
     - HCC

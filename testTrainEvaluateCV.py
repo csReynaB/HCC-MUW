@@ -777,7 +777,7 @@ class CoxnetWrapper(CoxnetSurvivalAnalysis):
 
         return self
 
-def calculate_cumulative_dynamic_auc(y_train, y_valid, risk_scores, time_points):
+def calculate_cumulative_dynamic_auc(y_train, y_valid, scores, time_points):
 
     valid_indices = y_valid.abs() <= y_train.abs().max()
     y_valid = y_valid[valid_indices]
@@ -797,14 +797,14 @@ def calculate_cumulative_dynamic_auc(y_train, y_valid, risk_scores, time_points)
     time_points_highlight = time_points[(time_points >= min_time_point) & (time_points <= max_time_point)]
 
     # Compute time-dependent AUC for this fold:
-    auc_values, _ = cumulative_dynamic_auc(
+    auc_values, mean_auc_values = cumulative_dynamic_auc(
         y_train_surv,
         y_valid_surv,
-        risk_scores[valid_indices],
+        scores[valid_indices],
         time_points_highlight  # generate or use time points appropriate for this fold
     )
 
-    return pd.Series(auc_values, index=time_points_highlight)
+    return pd.Series(auc_values, index=time_points_highlight), mean_auc_values
 
 def nested_cv_single(train_idx, valid_idx, X_train, y_time_train, pipeline = None,
                      param_grid = None, n_splits = 5, n_iter = 30,
@@ -974,6 +974,7 @@ def nested_cv(
 
     return model_list, shap_values, risk_scores, time_dependent_auc, c_index, validation_indices
 
+
 def train_and_evaluate_model(X_train: pd.DataFrame, y_time_train: pd.Series,
                              X_test: pd.DataFrame, y_time_test: pd.Series,
                              pipeline: Optional[Pipeline] = None,
@@ -982,8 +983,8 @@ def train_and_evaluate_model(X_train: pd.DataFrame, y_time_train: pd.Series,
                              n_iter: int = 30,
                              max_time_point = None,
                              random_state: int = 420,
-                             n_jobs: int = 1,
-                             get_only_model: bool = False)-> Tuple[Pipeline, pd.DataFrame, pd.Series, pd.Series, float]:
+                             n_jobs: int = -1,
+                             get_only_model: bool = False)-> Tuple[Pipeline, pd.DataFrame, pd.Series, pd.Series, float, float]:
 
     """
     Parameters
@@ -1022,12 +1023,15 @@ def train_and_evaluate_model(X_train: pd.DataFrame, y_time_train: pd.Series,
         Series of risk scores, indexed by sample.
     time_dependent_auc : pd.Series
         DataFrame with time-dependent AUC, indexed by timepoint.
+    mean_auc_values : float
+        Time-dependent AUC mean based on given timepoints
     c_index : float
         Performance score (e.g., c-index).
     """
 
     set_config(transform_output = "pandas")
     X_train, X_test = align_features(X_train, X_test)
+    shap_values_df = pd.DataFrame(0.0, index=X_test.index, columns=X_test.columns)
 
     if pipeline is None:
         params = {'objective': 'survival:cox', 'eval_metric': 'cox-nloglik',
@@ -1067,22 +1071,23 @@ def train_and_evaluate_model(X_train: pd.DataFrame, y_time_train: pd.Series,
     # Compute SHAP values using the regressor (last step)
     explainer = shap.TreeExplainer(best_estimator['regressor'])
     shap_values = explainer.shap_values(X_test)
-    shap_values_df = pd.DataFrame(shap_values, index=X_test.index, columns=X_test.columns)
+    shap_values = pd.DataFrame(shap_values, index=X_test.index, columns=X_test.columns)
+    shap_values_df.loc[shap_values.index, shap_values.columns] = shap_values
+
     # Reindex fold SHAP values to the master feature set, filling missing values with 0
     #shap_df_aligned = shap_values_df.reindex(columns=shap_values.columns, fill_value=0)
     # If a sample appears in only iteration just assign. If overlapping exist, you could sum and later average.
     #shap_values.loc[X_test.index] += shap_df_aligned
 
     # Compute performance score (e.g., c-index)
-    #cindex = c_index_scorer(y_test, risk_scores)
-    cindex = c_index_scorer_ipcw(y_time_train, y_time_test, risk_scores)
+    #c_index = c_index_scorer(y_test, risk_scores)
+    c_index = c_index_scorer_ipcw(y_time_train, y_time_test, risk_scores)
 
     max_time_point = y_time_train.abs().max() if max_time_point is None else max_time_point
     time_points =  np.arange(1, max_time_point, step=1)
-    time_dependent_auc = calculate_cumulative_dynamic_auc(y_time_train, y_time_test, risk_scores, time_points)
+    time_dependent_auc, mean_auc_values = calculate_cumulative_dynamic_auc(y_time_train, y_time_test, risk_scores, time_points)
 
-    return best_estimator, shap_values_df, risk_scores, time_dependent_auc, cindex
-
+    return best_estimator, shap_values_df, risk_scores, time_dependent_auc, mean_auc_values, c_index
 
 if __name__ == '__main__':
     # Parse the command-line argument for the random seed
@@ -1095,6 +1100,7 @@ if __name__ == '__main__':
     start_time = time.time()
 
     config_file = "/home/creyna/Vogl-lab_Projects_git/HCC/Metadata/config_survival_trainTest.yaml"
+    #config_file = "/gpfs/data/fs71974/creynablanco/MLpackage/config_file_survival.yaml"
     config = Config(config_file)
     metadata_handler = MetadataHandler(config)
     oligos_handler = OligosHandler(config)
@@ -1112,6 +1118,7 @@ if __name__ == '__main__':
     y_time_train = y_time_train.where(y_event_train == 1, -y_time_train)  # np.where(y_event, y_time, -y_time)
 
     config_file = "/home/creyna/Vogl-lab_Projects_git/HCC/Metadata/config_survival_withTKI.yaml"
+    #config_file = "/gpfs/data/fs71974/creynablanco/MLpackage/config_file_survival_TKI.yaml"
     config = Config(config_file)
     metadata_handler = MetadataHandler(config)
     oligos_handler = OligosHandler(config)
@@ -1165,7 +1172,7 @@ if __name__ == '__main__':
     }
 
 
-    best_estimator, test_shap_values, risk_scores_test, time_dependent_auc_test, c_index_test = train_and_evaluate_model(
+    best_estimator, test_shap_values, risk_scores_test, time_dependent_auc_test, time_dependent_auc_test_mean, c_index_test = train_and_evaluate_model(
         X_train,
         y_time_train, X_test, y_time_test,
         pipeline=pipeline,
@@ -1173,45 +1180,20 @@ if __name__ == '__main__':
         n_splits=5,
         n_iter=150, max_time_point=25,
         random_state=random_seed,
-        n_jobs=5)
+        n_jobs=-1)
 
 
     end_time = time.time()
     logger.info(f"Script runtime: {end_time - start_time:.2f} seconds")
 
     # Save the results as a dictionary
-    # Save the results as a dictionary
     results = {
         'best_estimator': best_estimator,
         'test_shap_values': test_shap_values,
         'risk_scores_test': risk_scores_test,
         'time_dependent_auc_test': time_dependent_auc_test,
+        'time_dependent_auc_test_mean': time_dependent_auc_test_mean,
         'c_index_test': c_index_test,
     }
     #
-    joblib.dump(results, f'evaluation_nested_cv_results_bestmodel_auc_{random_seed}.joblib')
-
-    # model_list, train_shap_values, risk_scores_train, time_dependent_auc_train, c_index_train, validation_indices = nested_cv(X_train,
-    #                                                                             y_time_train,
-    #                                                                             pipeline = pipeline,
-    #                                                                             param_grid=param_grid,
-    #                                                                             n_splits=10, n_splits_inner=5,
-    #                                                                             n_iter=50, max_time_point=24,
-    #                                                                             random_state=random_seed,
-    #                                                                             n_jobs = 1, n_jobs_inner = -1)
-    #
-    # end_time = time.time()
-    # logger.info(f"Script runtime: {end_time - start_time:.2f} seconds")
-    #
-    # # Save the results as a dictionary
-    # # Save the results as a dictionary
-    # results = {
-    #     'model_list': model_list,
-    #     'train_shap_values': train_shap_values,
-    #     'risk_scores_train': risk_scores_train,
-    #     'time_dependent_auc_train': time_dependent_auc_train,
-    #     'c_index_train': c_index_train,
-    #     'validation_indices_train': validation_indices
-    # }
-
-    #joblib.dump(results, f'get_bestModel_for_evaluation_{random_seed}.joblib')
+    joblib.dump(results, f'reevaluation_nested_cv_results_bestmodel_auc_{random_seed}.joblib')
