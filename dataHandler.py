@@ -7,6 +7,7 @@ import seaborn as sns
 from sklearn.preprocessing import LabelEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
+from sklearn.compose import ColumnTransformer
 from skopt.space import Integer, Real
 import xgboost as xgb
 #random forest
@@ -676,6 +677,9 @@ class FeatureManager:
     def filter_oligos_target_df(self, target_oligos_df):
         # Initialize the filters conditionally
 
+        demog_cols = [c for c in target_oligos_df.columns if c in self.config.extra_features_to_include]
+        peptide_cols = [c for c in target_oligos_df.columns if c not in self.config.extra_features_to_include]
+
         correlation_filter = CorrelationFilter(threshold=0.9, method='phi') if self.filter_by_correlation else None
         entropy_filter = EntropyFilter(threshold=self.entropy_threshold) if self.filter_by_entropy else None
         prevalence_filter = PrevalenceFilter(threshold_min=self.prevalence_threshold_min,
@@ -695,8 +699,19 @@ class FeatureManager:
         # Create a feature selection pipeline with active steps
         pipeline = Pipeline(pipeline_steps)
 
+        # 3) wrap that in a ColumnTransformer
+        ct = ColumnTransformer([
+            ("peptides", pipeline, peptide_cols),
+            ("demog", "passthrough", demog_cols),
+        ],
+            remainder="drop",
+            verbose_feature_names_out=False
+        )
+
+        # if you want back a pandas DataFrame with nice columns
+        #ct.set_output(transform="pandas")
         # Fit the pipeline and transform the DataFrame
-        return pipeline.fit_transform(target_oligos_df)
+        return ct.fit_transform(target_oligos_df)
 
     def get_oligos_with_target(self):
         target_df = self.get_target_df()  # Get target data

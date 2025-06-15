@@ -7,6 +7,7 @@ from sklearn.utils import resample
 from dataHandler import Config, MetadataHandler, OligosHandler, FeatureManager
 import json
 import argparse
+from functools import partial
 
 # basics
 import time
@@ -152,20 +153,21 @@ def compute_interp_tpr_auc(y_true, y_pred_proba, mean_fpr):
 
         return interp_tpr, auc_value
 
-def make_pipeline(peptide_cols, demog_cols, estimator):
+def make_pipeline(peptide_cols, demog_cols, estimator, random_state):
     """
     Build a pipeline which:
       - on peptide_cols: does variance threshold + SelectPercentile(mutual_info)
       - on demog_cols : just passes them through untouched
       - then fits whatever `estimator` you give it
     """
+    fix_mi = partial(mutual_info_classif, random_state=random_state)
     transformers = []
     if peptide_cols:
         transformers.append((
             "peptides",
             Pipeline([
                 ("variance_removal", VarianceThreshold(threshold=0.0)),
-                ("feature_selection", SelectPercentile(mutual_info_classif, percentile=20)),
+                ("feature_selection", SelectPercentile(fix_mi, percentile=20)),
             ]),
             peptide_cols
         ))
@@ -198,17 +200,20 @@ def nested_cv_single(train_idx, valid_idx, X_train, y_train, pipeline = None,
     y_train_fold, y_valid_fold = y_train.iloc[train_idx], y_train.iloc[valid_idx]
     if pipeline is None:
         params = {'objective': 'binary:logistic', 'eval_metric': 'auc',
-                  'random_state': random_state}
+                  'random_state': random_state, 'n_jobs':1}
 
         ALL_DEMOG = {"Sex", "Age"}
         peptide_cols = [c for c in X_train.columns if c not in ALL_DEMOG]
         demog_cols = [c for c in X_train.columns if c in ALL_DEMOG]
 
         # Build the pipeline for this fold.
-        pipeline = make_pipeline(peptide_cols=peptide_cols, demog_cols=demog_cols, estimator=XGBClassifier(**params))
+        pipeline = make_pipeline(peptide_cols=peptide_cols, demog_cols=demog_cols, estimator=XGBClassifier(**params), random_state=random_state)
 
     # Perform hyperparameter tuning if param_grid is provided.
     if param_grid is not None:
+        valid_params = set(pipeline.get_params().keys())
+        # keep only those entries whose key is in valid_params
+        param_grid = {k: v for k, v in param_grid.items() if k in valid_params}
         # Use your search_best_model function or similar with BayesSearchCV
         best_estimator = search_best_model(pipeline, param_grid, X_train_fold, y_train_fold,
                                            n_splits=n_splits, n_iter=n_iter, random_state=random_state, n_jobs=n_jobs)
@@ -364,14 +369,15 @@ def _compute_roc_metrics_test(estimator, X_test, y_test, predicted_probs_test):
     return roc_metrics
 
 def train_and_validate_model(X_train: pd.DataFrame, y_train: pd.Series,
-                             X_test: pd.DataFrame, y_test: pd.Series,
+                             X_test: Optional[pd.DataFrame] = None, y_test: Optional[Series] = None,
                              pipeline: Optional[Pipeline] = None,
                              param_grid: Optional[Dict] = None,
+                             best_estimator: Optional[Pipeline] = None,  # need to be pipeline
                              n_splits: int = 10,
                              n_iter: int = 30,
                              random_state: int = 420,
                              n_jobs: int = -1,
-                             get_only_model: bool = False)-> None | Pipeline | tuple[Pipeline | Any, DataFrame, Series, Dict]:
+                             get_only_model: bool = False)-> None | Pipeline | tuple[Pipeline, DataFrame, Series, Dict]:
 
     """
     Parameters
@@ -380,14 +386,16 @@ def train_and_validate_model(X_train: pd.DataFrame, y_train: pd.Series,
         Feature matrix for training.
     y_train : pd.Series
         Target variable for training.
-    X_test : pd.DataFrame
+    X_test : pd.DataFrame, optional
         Feature matrix for testing.
-    y_test : pd.Series
+    y_test : pd.Series, optional
         Target variable for testing.
     pipeline : dict, optional
         Default pipeline for hyperparameter tuning. If None, default parameters are used.
     param_grid : dict, optional
         Hyperparameter grid to search over. If None, no hyperparameter tuning is performed.
+    best_estimator : Pipeline, optional
+        Best estimator to predict on test data
     n_splits : int, default 10
         Number of outer CV splits.
     n_iter : int, default 30
@@ -411,33 +419,38 @@ def train_and_validate_model(X_train: pd.DataFrame, y_train: pd.Series,
     """
 
     set_config(transform_output = "pandas")
-    X_train, X_test = align_features(X_train, X_test)
-    shap_values_df = pd.DataFrame(0.0, index=X_test.index, columns=X_test.columns)
 
-    if pipeline is None:
-        params = {'objective': 'binary:logistic', 'eval_metric': 'auc',
-                  'random_state': random_state}
+    if not get_only_model:
+        X_train, X_test = align_features(X_train, X_test)
+        shap_values_df = pd.DataFrame(0.0, index=X_test.index, columns=X_test.columns)
 
-        ALL_DEMOG = {"Sex", "Age"}
-        peptide_cols = [c for c in X_train.columns if c not in ALL_DEMOG]
-        demog_cols = [c for c in X_train.columns if c in ALL_DEMOG]
+    # if the user handed us an already‐trained model, use that
+    if best_estimator is None:
+        if pipeline is None:
+            params = {'objective': 'binary:logistic', 'eval_metric': 'auc',
+                      'random_state': random_state, 'n_jobs':1}
+            ALL_DEMOG = {"Sex", "Age"}
+            peptide_cols = [c for c in X_train.columns if c not in ALL_DEMOG]
+            demog_cols = [c for c in X_train.columns if c in ALL_DEMOG]
 
-        # Build the pipeline
-        pipeline = make_pipeline(peptide_cols=peptide_cols, demog_cols=demog_cols, estimator=XGBClassifier(**params))
+            # Build the pipeline
+            pipeline = make_pipeline(peptide_cols=peptide_cols, demog_cols=demog_cols, estimator=XGBClassifier(**params), random_state=random_state)
+            # Perform hyperparameter tuning if param_grid is provided.
+        if param_grid is not None:
+            valid_params = set(pipeline.get_params().keys())
+            # keep only those entries whose key is in valid_params
+            param_grid = {k: v for k, v in param_grid.items() if k in valid_params}
+            # Use your search_best_model function or similar with BayesSearchCV
+            best_estimator = search_best_model(pipeline, param_grid, X_train, y_train,
+                                               n_splits=n_splits, n_iter=n_iter, random_state=random_state, n_jobs=n_jobs)
+        else:
+            best_estimator = pipeline
+            best_estimator.fit(X_train, y_train)
 
-        # Perform hyperparameter tuning if param_grid is provided.
-    if param_grid is not None:
-        # Use your search_best_model function or similar with BayesSearchCV
-        best_estimator = search_best_model(pipeline, param_grid, X_train, y_train,
-                                           n_splits=n_splits, n_iter=n_iter, random_state=random_state, n_jobs=n_jobs)
-    else:
-        best_estimator = pipeline
-        best_estimator.fit(X_train, y_train)
+        if get_only_model:
+            return best_estimator
 
-    if get_only_model:
-        return best_estimator
-
-        # Predict risk scores on the validation fold
+        # Predict risk scores on the validation
     scores = best_estimator.predict_proba(X_test)[:, 1]
     scores = pd.Series(scores, index=X_test.index, name='Score')
 
@@ -458,7 +471,6 @@ def train_and_validate_model(X_train: pd.DataFrame, y_train: pd.Series,
     shap_values = explainer.shap_values(X_test)
     shap_values = pd.DataFrame(shap_values, index=X_test.index, columns=X_test.columns)
     shap_values_df.loc[shap_values.index, shap_values.columns] = shap_values
-
     logger.info(f"AUC in testing set: {roc_metrics_test.get('auc'):.4f}")
 
     # # Create predictions DataFrame
@@ -468,21 +480,30 @@ def train_and_validate_model(X_train: pd.DataFrame, y_train: pd.Series,
 
     return best_estimator, shap_values_df, scores, roc_metrics_test
 
+
+def str2bool(x):
+    xl = x.lower()
+    if xl in ("yes", "true", "t", "y", "1"):
+        return True
+    if xl in ("no",  "false", "f", "n", "0"):
+        return False
+    raise argparse.ArgumentTypeError(f"Boolean value expected, got {x!r}")
+
 if __name__ == '__main__':
     # Parse the command-line argument for the random seed
     parser = argparse.ArgumentParser(description="Run nested CV and validation with custom random seed and metadata filters.")
 
     parser.add_argument("--seed", "-s", type=int, nargs="?", default=420,
                         help="Random seed (default: 420)")
-    parser.add_argument("--run_nested_cv", "-ncv", type=bool, default=True,
+    parser.add_argument("--run_nested_cv", "-ncv", type=str2bool, default=True,
                         help="Run nested cv for training set (default: True)")
     parser.add_argument("--subgroup", "-sub", type=str,
                         default="all",
                         help="What subgroup of peptides to include in the analysis. Default = all")
-    parser.add_argument("--with_oligos", "-wo", type=bool,
+    parser.add_argument("--with_oligos", "-wo", type=str2bool,
                         default=True,
                         help="Include or not peptides in the analysis. Default = True")
-    parser.add_argument("--with_additional_features", "-wa", type=bool,
+    parser.add_argument("--with_additional_features", "-wa", type=str2bool,
                         default=False,
                         help="Include or not additional features in the analysis (e.g. Sex and Age). Default = False")
     parser.add_argument("--prevalence_threshold_min", "-min", type=float,
@@ -494,55 +515,61 @@ if __name__ == '__main__':
     parser.add_argument("--train_size", "-ts", type=float,
                         default=0.7,
                         help="Train split size for controls. Default = 0.7")
+    parser.add_argument("--no_additional_train_test_data", "-nat", type=str2bool,
+                        default=False,
+                        help="Whether to concatenate extra train/test data (True|False).")
+    parser.add_argument("--only_train_model", "-otm", type=str2bool,
+                        default=False,
+                        help="Whether to only train model or return predictions as well(True|False).")
+    parser.add_argument("--outer_cv_split", "-ocv", type=int,
+                        default=10,
+                        help="Number of k folds for outer cross-validation. Default = 10")
+    parser.add_argument("--inner_cv_split", "-icv", type=int,
+                        default=5,
+                        help="Number of k folds for inner cross-validation. Default = 5")
 
-
-    parser.add_argument("--filter_controls", "-fc", type=json.loads,
+    parser.add_argument("--train_test_split_data", "-sp", type=json.loads,
                         default={},
-                        help=("JSON dict of metadata filters for controls, e.g. " "'{\"group_test\":\"Controls\",\"other_key\":\"value\"}'. "
+                        help=("JSON dict of metadata for splitting, e.g. " "'{\"group_test\":\"Controls\",\"other_key\":\"value\"}'. "
                               "Default = {}"))
-    parser.add_argument("--filter_train", "-fn", type=json.loads,
+    parser.add_argument("--train", "-t", type=json.loads,
                         default={},
-                        help=("JSON dict of metadata filters for train nested cv, e.g. " "'{\"group_test\":\"Controls\",\"other_key\":\"value\"}'. "
+                        help=("JSON dict of metadata for train, e.g. " "'{\"group_test\":\"Controls\",\"other_key\":\"value\"}'. "
                               "Default = {}"))
-    parser.add_argument("--filter_val", "-fv1", type=json.loads,
-                        default={},
-                        help=(
-                            "JSON dict of metadata filters for validation, e.g. " "'{\"group_test\":\"Controls\",\"other_key\":\"value\"}'. "
-                            "Default = {}"))
-    parser.add_argument("--filter_val2", "-fv2", type=json.loads,
-                        default={},
-                        help=(
-                            "JSON dict of metadata filters for validation, e.g. " "'{\"group_test\":\"Controls\",\"other_key\":\"value\"}'. "
-                            "Default = {}"))
+    # Instead of two separate filter_val flags, we do:
+    #   --validate '{"treatment":"ICI"}' HCC-ICI-H
+    #   --validate '{"treatment":"TKI"}' HCC-ICI-TKI
+    parser.add_argument(
+        "-v", "--validate",
+        nargs=2,  # two arguments per occurrence
+        action="append", default=[],
+        metavar=("FILTER_JSON", "OUT_BASENAME"),
+        help="One validation set: JSON filter and output‐base, e.g. '{\"treatment\":\"ICI\"} HCC-ICI-H'.")
 
-    parser.add_argument("--out_nested", "-o", type=str,
-                        default="out_nested",
-                        help="Base name for nested‐CV predictions (default: out_nested)")
-    parser.add_argument("--out_val", "-ov",
-                        type=str,
-                        default="out_val",
-                        help="Base name for validation predictions (default: out_val)")
-    parser.add_argument("--out_val2", "-ov2",
-                        type=str,
-                        default="out_val2",
-                        help="Base name for second validation predictions (default: out_val2)")
+    parser.add_argument("--out_name", "-o", type=str,
+                        default="out_name",
+                        help="Base name for nested‐CV and train_test split predictions (default: out_name)")
     parser.add_argument("--out_dir", "-d",
                         type=str,
                         default=".",
                         help="Base name for directory to save files (default: .)")
 
     args = parser.parse_args()
-    random_seed = args.seed
 
+    random_seed = args.seed
+    outer_cv_split = args.outer_cv_split
+    inner_cv_split = args.inner_cv_split
+
+    val_specs = [(json.loads(filt), outname) for filt, outname in (args.validate or [])]
 
     config_file = "/home/creyna/Vogl-lab_Projects_git/HCC/Metadata/config_standard.yaml"
-    #config_file = "/gpfs/data/fs71974/creynablanco/MLpackage/config_control_hcc.yaml"
+    #config_file = "/gpfs/data/fs71974/creynablanco/Projects/HCC/Classification/Diagnostics/Controls_Cirrhosis/script/config_standard.yaml"
     config = Config(config_file)
     config.get_bayesian_param_grid_from_dict_items() # format bayesian param grid from config file
 
     # Check if Controls should be split
-    if args.filter_controls:
-        config.filters_metadata = args.filter_controls
+    if args.train_test_split_data:
+        config.filters_metadata = args.train_test_split_data
         metadata_handler = MetadataHandler(config)
         # oligos_handler = OligosHandler(config)
         oligos_handler = OligosHandler(config)  # , data_type=config.data_types[0])
@@ -552,51 +579,35 @@ if __name__ == '__main__':
                                          with_additional_features=args.with_additional_features,
                                          prevalence_threshold_min=0,
                                          prevalence_threshold_max=100)
-        X_controls, y_controls = feature_manager.get_features_target()
-        X_controls_train, X_controls_test, y_controls_train, y_controls_test = train_test_split(X_controls, y_controls, train_size=args.train_size,
-                                                                                                random_state=random_seed, shuffle=True)
+        X, y = feature_manager.get_features_target()
+        stratify_param = y if y.nunique() > 1 else None
+        X_split_train, X_split_test, y_split_train, y_split_test = train_test_split(X, y, train_size=args.train_size,
+                                                                                                random_state=random_seed, shuffle=True, stratify=stratify_param)
 
-    # Check for nested
-    if args.filter_train:
-        config.filters_metadata = args.filter_train
-        metadata_handler = MetadataHandler(config)
-        # oligos_handler = OligosHandler(config)
-        oligos_handler = OligosHandler(config)  # , data_type=config.data_types[0])
-        feature_manager = FeatureManager(config, metadata_handler, oligos_handler,
-                                         subgroup=args.subgroup,
-                                         with_oligos=args.with_oligos,
-                                         with_additional_features=args.with_additional_features,
-                                         prevalence_threshold_min=0,
-                                         prevalence_threshold_max=100)
-        X_train, y_train = feature_manager.get_features_target()
-
-        if args.filter_controls:
-            X_train = pd.concat([X_train, X_controls_train])
-            y_train = pd.concat([y_train, y_controls_train])
-
+    if args.no_additional_train_test_data:
+        X_train, X_test, y_train, y_test = X_split_train, X_split_test, y_split_train, y_split_test
         feature_manager.prevalence_threshold_min = args.prevalence_threshold_min
         feature_manager.prevalence_threshold_max = args.prevalence_threshold_max
         X_train = feature_manager.filter_oligos_target_df(X_train)
         feature_manager.prevalence_threshold_min = 0.0
         feature_manager.prevalence_threshold_max = 100.0
 
-
         if args.run_nested_cv:
             start_time = time.time()
             params = {'objective': 'binary:logistic', 'eval_metric': 'auc',
-                      'random_state': random_seed}
+                      'random_state': random_seed, 'n_jobs':1}
             ALL_DEMOG = {"Sex", "Age"}
             peptide_cols = [c for c in X_train.columns if c not in ALL_DEMOG]
             demog_cols = [c for c in X_train.columns if c in ALL_DEMOG]
-            pipeline = make_pipeline(peptide_cols=peptide_cols, demog_cols=demog_cols, estimator=XGBClassifier(**params))
+            pipeline = make_pipeline(peptide_cols=peptide_cols, demog_cols=demog_cols, estimator=XGBClassifier(**params), random_state=random_seed)
 
             model_list, train_shap_values, scores_train, validation_indices, roc_metrics_train = nested_cv(X_train,
                                                                                                            y_train,
                                                                                                            pipeline=pipeline,
                                                                                                            param_grid=config.param_grid,
-                                                                                                           n_splits=2,
-                                                                                                           n_splits_inner=2,
-                                                                                                           n_iter=2,
+                                                                                                           n_splits=outer_cv_split,
+                                                                                                           n_splits_inner=inner_cv_split,
+                                                                                                           n_iter=50,
                                                                                                            random_state=random_seed,
                                                                                                            n_jobs=1,
                                                                                                            n_jobs_inner=-1)
@@ -609,74 +620,138 @@ if __name__ == '__main__':
                 'validation_indices_train': validation_indices,
                 'roc_metrics_train': roc_metrics_train
             }
-            joblib.dump(results, f'{args.out_dir}/nested_predictions_{args.out_nested}_{random_seed}.joblib')
+            joblib.dump(results, f'{args.out_dir}/nested_predictions_{args.out_name}_{random_seed}.joblib')
 
             end_time = time.time()
-            logger.info(f"nested cv runtime: {end_time - start_time:.2f} seconds")
+            logger.info(f"nested cv runtime for {args.out_name}: {end_time - start_time:.2f} seconds")
 
-        # run first validation set if available
-        if args.filter_val:
+
+        start_time = time.time()
+        best_estimator, test_shap_values, scores_test, roc_metrics_test = train_and_validate_model(X_train, y_train,
+                                                                                                    X_test, y_test,
+                                                                                                    #pipeline=pipeline,
+                                                                                                    param_grid=config.param_grid,
+                                                                                                    n_splits=outer_cv_split,
+                                                                                                    n_iter=50,
+                                                                                                    random_state=random_seed,
+                                                                                                    n_jobs=-1,
+                                                                                                    get_only_model=False)
+        # Save the results as a dictionary
+        results = {
+            'best_estimator': best_estimator,
+            'test_shap_values': test_shap_values,
+            'scores_test': scores_test,
+            'roc_metrics_test': roc_metrics_test}
+        joblib.dump(results, f'{args.out_dir}/validation_predictions_{args.out_name}_{random_seed}.joblib')
+        end_time = time.time()
+        logger.info(f"validation for {args.out_name} runtime: {end_time - start_time:.2f} seconds")
+
+    elif args.train:
+        config.filters_metadata = args.train
+        metadata_handler = MetadataHandler(config)
+        # oligos_handler = OligosHandler(config)
+        oligos_handler = OligosHandler(config)  # , data_type=config.data_types[0])
+        feature_manager = FeatureManager(config, metadata_handler, oligos_handler,
+                                         subgroup=args.subgroup,
+                                         with_oligos=args.with_oligos,
+                                         with_additional_features=args.with_additional_features,
+                                         prevalence_threshold_min=0,
+                                         prevalence_threshold_max=100)
+        X_train, y_train = feature_manager.get_features_target()
+        if args.train_test_split_data:
+            X_train = pd.concat([X_train, X_split_train])
+            y_train = pd.concat([y_train, y_split_train])
+
+        feature_manager.prevalence_threshold_min = args.prevalence_threshold_min
+        feature_manager.prevalence_threshold_max = args.prevalence_threshold_max
+        X_train = feature_manager.filter_oligos_target_df(X_train)
+        feature_manager.prevalence_threshold_min = 0.0
+        feature_manager.prevalence_threshold_max = 100.0
+
+
+        if args.run_nested_cv:
             start_time = time.time()
+            params = {'objective': 'binary:logistic', 'eval_metric': 'auc',
+                      'random_state': random_seed, 'n_jobs':1}
+            ALL_DEMOG = config.extra_features_to_include
+            peptide_cols = [c for c in X_train.columns if c not in ALL_DEMOG]
+            demog_cols = [c for c in X_train.columns if c in ALL_DEMOG]
+            pipeline = make_pipeline(peptide_cols=peptide_cols, demog_cols=demog_cols, estimator=XGBClassifier(**params), random_state=random_seed)
 
-            config.filters_metadata = args.filter_val
-            X_test, y_test = feature_manager.get_features_target()
-
-            if args.filter_controls:
-                X_test = pd.concat([X_test, X_controls_test])
-                y_test = pd.concat([y_test, y_controls_test])
-
-            best_estimator, test_shap_values, scores_test, roc_metrics_test = train_and_validate_model(X_train, y_train,
-                                                                                                       X_test, y_test,
-                                                                                                       #pipeline=pipeline,
-                                                                                                       param_grid=config.param_grid,
-                                                                                                       n_splits=2,
-                                                                                                       n_iter=2,
-                                                                                                       random_state=random_seed,
-                                                                                                       n_jobs=-1,
-                                                                                                       get_only_model=False)
+            model_list, train_shap_values, scores_train, validation_indices, roc_metrics_train = nested_cv(X_train,
+                                                                                                           y_train,
+                                                                                                           pipeline=pipeline,
+                                                                                                           param_grid=config.param_grid,
+                                                                                                           n_splits=outer_cv_split,
+                                                                                                           n_splits_inner=inner_cv_split,
+                                                                                                           n_iter=50,
+                                                                                                           random_state=random_seed,
+                                                                                                           n_jobs=1,
+                                                                                                           n_jobs_inner=-1)
 
             # Save the results as a dictionary
             results = {
-                'best_estimator': best_estimator,
-                'test_shap_values': test_shap_values,
-                'scores_test': scores_test,
-                'roc_metrics_test': roc_metrics_test
+                'model_list': model_list,
+                'train_shap_values': train_shap_values,
+                'scores_train': scores_train,
+                'validation_indices_train': validation_indices,
+                'roc_metrics_train': roc_metrics_train
             }
-            joblib.dump(results, f'{args.out_dir}/validation_predictions_{args.out_val}_{random_seed}.joblib')
+            joblib.dump(results, f'{args.out_dir}/nested_predictions_{args.out_name}_{random_seed}.joblib')
 
             end_time = time.time()
-            logger.info(f"validation 1 runtime: {end_time - start_time:.2f} seconds")
+            logger.info(f"nested cv runtime for {args.out_name}: {end_time - start_time:.2f} seconds")
 
-
-        # run second validation set if available
-        if args.filter_val2:
+        if val_specs:
             start_time = time.time()
-
-            config.filters_metadata = args.filter_val2
-            X_test, y_test = feature_manager.get_features_target()
-
-            if args.filter_controls:
-                X_test = pd.concat([X_test, X_controls_test])
-                y_test = pd.concat([y_test, y_controls_test])
-            print(random_seed)
-            best_estimator, test_shap_values, scores_test, roc_metrics_test = train_and_validate_model(X_train, y_train,
-                                                                                                       X_test, y_test,
-                                                                                                       #pipeline=pipeline,
-                                                                                                       param_grid=config.param_grid,
-                                                                                                       n_splits=2,
-                                                                                                       n_iter=2,
-                                                                                                       random_state=random_seed,
-                                                                                                       n_jobs=-1,
-                                                                                                       get_only_model=False)
-
-            # Save the results as a dictionary
-            results = {
-                'best_estimator': best_estimator,
-                'test_shap_values': test_shap_values,
-                'scores_test': scores_test,
-                'roc_metrics_test': roc_metrics_test
-            }
-            joblib.dump(results, f'{args.out_dir}/validation_predictions_{args.out_val2}_{random_seed}.joblib')
-
+            best_estimator = train_and_validate_model(
+                X_train, y_train,
+                X_test=None, y_test=None,  # we won’t score yet
+                pipeline=None,
+                param_grid=config.param_grid,
+                n_splits=outer_cv_split,
+                n_iter=50,
+                random_state=random_seed,
+                n_jobs=-1,
+                get_only_model=True  # <— return only the fitted estimator
+            )
             end_time = time.time()
-            logger.info(f"validation 2 runtime: {end_time - start_time:.2f} seconds")
+            logger.info(f"train best model with {args.out_name} runtime: {end_time - start_time:.2f} seconds")
+
+            if args.only_train_model:
+                results = {
+                    'best_estimator': best_estimator
+                }
+                joblib.dump(results, f'{args.out_dir}/training_model_{args.out_name}_{random_seed}.joblib')
+            else:
+                # run validation if some sets were given
+                for filter_val, out_val in val_specs:
+                    start_time = time.time()
+                    config.filters_metadata = filter_val
+                    X_test, y_test = feature_manager.get_features_target()
+
+                    if args.train_test_split_data:
+                        X_test = pd.concat([X_test, X_split_test])
+                        y_test = pd.concat([y_test, y_split_test])
+
+                    best_estimator, test_shap_values, scores_test, roc_metrics_test = train_and_validate_model(X_train, y_train,
+                                                                                                               X_test, y_test,
+                                                                                                               param_grid=config.param_grid,
+                                                                                                               best_estimator=best_estimator,
+                                                                                                               n_splits=outer_cv_split,
+                                                                                                               n_iter=50,
+                                                                                                               random_state=random_seed,
+                                                                                                               n_jobs=-1,
+                                                                                                               get_only_model=False)
+
+                    # Save the results as a dictionary
+                    results = {
+                        'best_estimator': best_estimator,
+                        'test_shap_values': test_shap_values,
+                        'scores_test': scores_test,
+                        'roc_metrics_test': roc_metrics_test
+                    }
+                    joblib.dump(results, f'{args.out_dir}/validation_predictions_{out_val}_{random_seed}.joblib')
+
+                    end_time = time.time()
+                    logger.info(f"validation for {out_val} runtime: {end_time - start_time:.2f} seconds")
