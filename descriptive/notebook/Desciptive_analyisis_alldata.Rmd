@@ -1,0 +1,1350 @@
+---
+title: "HCC MUW Project"
+author: "Carlos S. Reyna-Blanco"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true           # Enable table of contents
+    toc_float: true     # Make the table of contents float on the side
+    number_sections: true  # Optional: Number your sections
+    toc_depth: 5  
+    css: "style.css"    # Add this line to reference the CSS file
+
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo  = FALSE, warning = FALSE, message = FALSE
+                      ,fig.width  = 5, fig.height = 4) # default figure dimensions (in inches)
+
+source("../src/hcc_utils.R")
+library(viridis)
+
+# Read enrichment data ----
+exist <- read.csv("../Data/exist.csv", header = TRUE, row.names = 1)
+
+
+metadata <- readxl::read_excel("../Metadata/HCC_MUW_metadata_allSamples_etiologyHCC.xlsx", sheet = 1) %>% 
+    mutate(
+    hcc_orr = case_when(
+    group_test == "Controls" ~ "Controls",
+    group_test == "Cirrhosis" ~ "Cirrhosis",
+    group_test == "HCC" & ORR_ctg == "non ORR" ~ "HCC\nnon ORR",
+    group_test == "HCC" & ORR_ctg == "ORR" ~ "HCC\nORR",
+    TRUE ~ NA_character_),
+    hcc_dcr = case_when(
+    group_test == "Controls" ~ "Controls",
+    group_test == "Cirrhosis" ~ "Cirrhosis",
+    group_test == "HCC" & DCR_ctg == "non DCR" ~ "HCC\nnon DCR",
+    group_test == "HCC" & DCR_ctg == "DCR" ~ "HCC\nDCR",
+    TRUE ~ NA_character_),
+
+    subgroup_orr = case_when(
+    subgroups == "Controls" ~ "Controls",
+    subgroups == "Cirrhosis" ~ "Cirrhosis",
+    subgroups == "HCC-ICI" & ORR_ctg == "ORR" ~ "HCC-ICI\nORR",
+    subgroups == "HCC-ICI" & ORR_ctg == "non ORR" ~ "HCC-ICI\nnon ORR",
+    subgroups == "HCC-TKI" & ORR_ctg == "ORR" ~ "HCC-TKI\nORR",
+    subgroups == "HCC-TKI" & ORR_ctg == "non ORR" ~ "HCC-TKI\nnon ORR",
+    TRUE ~ NA_character_),
+    subgroup_dcr = case_when(
+    subgroups == "Controls" ~ "Controls",
+    subgroups == "Cirrhosis" ~ "Cirrhosis",
+    subgroups == "HCC-ICI" & DCR_ctg == "DCR" ~ "HCC-ICI\nDCR",
+    subgroups == "HCC-ICI" & DCR_ctg == "non DCR" ~ "HCC-ICI\nnon DCR",
+    subgroups == "HCC-TKI" & DCR_ctg == "DCR" ~ "HCC-TKI\nDCR",
+    subgroups == "HCC-TKI" & DCR_ctg == "non DCR" ~ "HCC-TKI\nnon DCR",
+    TRUE ~ NA_character_),
+
+    Etiology_diseases = case_when(
+    Etiology %in% c("HBV") &  group_test == "HCC"  ~ "HCC-HBV",
+    Etiology %in% c("HCV") &  group_test == "HCC"  ~ "HCC-HCV",
+    Etiology %in% c("HCV-ALD") &  group_test == "HCC"  ~ "HCC-HCV-ALD",
+    
+    Etiology %in% c("ALD", "ALD-NASH") & group_test %in% "HCC"  ~ "HCC alcohol",
+    Etiology %in% c("NASH") & group_test %in% "HCC"  ~ "HCC MASH",
+    Etiology == "unclear/others" & group_test %in% "HCC"  ~ "HCC other",
+    
+    Etiology %in% c("HBV") &  group_test == "Cirrhosis"  ~ "Cirr-HBV",
+    Etiology %in% c("HCV") &  group_test == "Cirrhosis"  ~ "Cirr-HCV",
+    Etiology %in% c("HCV-ALD") &  group_test == "Cirrhosis"  ~ "Cirr-HCV-ALD",
+    
+    Etiology %in% c("ALD", "ALD-NASH") & group_test %in% "Cirrhosis"  ~ "Cirr alcohol",
+    Etiology %in% c("NASH") & group_test %in% "Cirrhosis"  ~ "Cirr MASH",
+    Etiology == "unclear/others" & group_test %in% "Cirrhosis"  ~ "Cirr other", 
+    
+    is.na(Etiology) ~ NA_character_),
+    
+    Etiology_group = case_when(
+    Etiology %in% c("HBV", "HCV", "HCV-ALD") ~ "viral",
+    Etiology %in% c("ALD", "ALD-NASH") ~ "alcohol",
+    Etiology %in% c("NASH") ~ "MASH",
+    Etiology == "unclear/others" ~ "other",
+    is.na(Etiology) ~ NA_character_,
+    TRUE ~ "other"),
+    
+    Etiology_group_hcc = case_when(
+    Etiology %in% c("HBV", "HCV", "HCV-ALD") & group_test %in% "HCC" ~ "HCC viral",
+    Etiology %in% c("ALD", "ALD-NASH") & group_test %in% "HCC"  ~ "HCC alcohol",
+    Etiology %in% c("NASH") & group_test %in% "HCC"  ~ "HCC MASH",
+    Etiology == "unclear/others" & group_test %in% "HCC"  ~ "HCC other",
+    is.na(Etiology) ~ NA_character_,
+    TRUE ~ NA_character_),
+    
+    Etiology_group_cirr = case_when(
+    Etiology %in% c("HBV", "HCV", "HCV-ALD") & group_test %in% "Cirrhosis" ~ "Cirrhosis viral",
+    Etiology %in% c("ALD", "ALD-NASH") & group_test %in% "Cirrhosis"  ~ "Cirrhosis alcohol",
+    Etiology %in% c("NASH") & group_test %in% "Cirrhosis"  ~ "Cirrhosis MASH",
+    Etiology == "unclear/others" & group_test %in% "Cirrhosis"  ~ "Cirrhosis other",
+    is.na(Etiology) ~ NA_character_,
+    TRUE ~ NA_character_),
+    
+    control_diseases = case_when(
+      group_test == "Controls" ~ "Controls",
+      group_test %in% c("HCC", "Cirrhosis") ~ "Liver Diseases",
+      TRUE ~ NA_character_),
+    
+  Age_group = cut(Age, breaks = seq(0, 100, by = 5), right = FALSE),
+  Sex_ctg = factor(Sex, levels = c(0, 1), labels = c("Female", "Male")))
+
+
+# define, for each grouping variable, the precise order of levels you want
+group_cols <- c("group_test", "subgroups", "control_diseases", 
+                "Etiology", "Etiology_group_hcc", "Etiology_group_cirr", "Etiology_group", "Etiology_diseases",
+                "hcc_orr", "hcc_dcr", "subgroup_orr", "subgroup_dcr" )
+
+level_map <- list(
+  group_test    = rev(c("Controls", "Cirrhosis", "HCC")),
+  control_diseases    = c("Controls", "Liver Diseases"),
+  subgroups     = c("HCC-ICI", "HCC-TKI",  "Cirrhosis", "Controls"),
+  hcc_orr       = c("Controls", "Cirrhosis", "HCC\nnon ORR", "HCC\nORR"),
+  hcc_dcr       = c("Controls", "Cirrhosis", "HCC\nnon DCR", "HCC\nDCR"),
+  subgroup_orr  = c("Controls", "Cirrhosis", "HCC-ICI\nnon ORR", "HCC-ICI\nORR", 
+                    "HCC-TKI\nnon ORR", "HCC-TKI\nORR"),
+  subgroup_dcr  = c("Controls", "Cirrhosis", "HCC-ICI\nnon DCR", "HCC-ICI\nDCR", 
+                    "HCC-TKI\nnon DCR", "HCC-TKI\nDCR"),
+  Etiology = c("HBV", "HCV", "ALD", "NASH", "HCV-ALD", "ALD-NASH", "unclear/others"),
+  Etiology_diseases = c("HCC-HBV", "HCC-HCV", "HCC-HCV-ALD", "Cirr-HBV", "Cirr-HCV", "Cirr-HCV-ALD", 
+                        "HCC alcohol", "HCC MASH", "HCC other", "Cirr alcohol", "Cirr MASH", "Cirr other"),
+  Etiology_group = c("viral", "alcohol", "MASH", "other"),
+  Etiology_group_hcc = c("HCC viral", "HCC alcohol", "HCC MASH", "HCC other"),
+  Etiology_group_cirr = c("Cirrhosis viral", "Cirrhosis alcohol", "Cirrhosis MASH", "Cirrhosis other")
+)
+
+
+metadata <- metadata %>%
+  # for each of the group_cols, re-factor in one go
+  mutate(
+    across(
+    all_of(c(group_cols)),
+    ~ factor(.x, levels = level_map[[cur_column()]]),
+    .names = "{.col}"
+    )
+  )
+
+
+# Library metadata ----
+lib_metadata_df <- readRDS("../Metadata/combined_libraries_with_lineages_important_info_nonAAseq.rds") %>%
+  mutate(
+    species = str_remove_all(species, "\\[|\\]"), #a few species with this
+    species = str_squish(species)     
+  )
+
+
+subgroup_lib_df <- lib_metadata_df %>%
+  tibble::rownames_to_column(var = "Peptide") %>%
+  mutate(
+    across(
+      all_of(SUBGROUPS_TO_INCLUDE),
+      ~ if_else(is.na(.x), FALSE, .x)
+    )
+  ) %>%
+  select(Peptide, all_of(SUBGROUPS_TO_INCLUDE))
+
+
+# merged enriched binary table with metadata ----
+features_target <- as.data.frame(t(exist)) %>%
+  tibble::rownames_to_column("SampleName")%>%
+  dplyr::left_join(metadata %>% select(any_of(c("SampleName", group_cols))), by = "SampleName")
+
+
+
+# Colors ----
+custom_colors <- c(
+                   "Controls" = "#66a61e", 
+                   "Cirrhosis" = "#bc80bd",
+                   "HCC" = "#d95f02",
+                   
+                   "HCC-ICI" = "darkorange2",
+                   "HCC-TKI" = "gold2",
+                   
+                   "HCC\nORR" = "tomato2",
+                   "HCC\nnon ORR" = "orange1",
+                   "HCC\nDCR" = "salmon4",
+                   "HCC\nnon DCR" = "sandybrown",
+                   
+                   "HCC-ICI\nORR" =   "darkorange",
+                   "HCC-ICI\nnon ORR" = "indianred3",
+                   "HCC-TKI\nORR" =  "gold3",
+                   "HCC-TKI\nnon ORR" = "yellow2",
+                   
+                   "HCC-ICI\nDCR" = "darkorange3",
+                   "HCC-ICI\nnon DCR" = "indianred",
+                   "HCC-TKI\nDCR" = "gold4",
+                   "HCC-TKI\nnon DCR" = "khaki2"
+                   ) 
+
+etiology_colors <- c("HBV" = "#CC6677", "HCV" = "#6699CC", "ALD" = "#999933", "NASH" = "#117733", 
+                     "HCV-ALD" = "orchid4", "ALD-NASH" = "yellow3", "unclear" = "#888888")
+etiology_group_colors <- c("viral" = "#CC6677", "alcohol" = "cadetblue", "MASH" = "#999933", "other" = "#888888")
+
+sex_colors <- c("Female" = "#F5C710", "Male" = "darkcyan")
+group_cols2 <- group_cols[c(1:3,5:7,8)]
+group_cols2
+```
+
+
+# Sex/Age Distribution {.tabset}
+
+Distribution of Sex/Age per group comparisons.
+
+- Antibody profiling show almost equal number of age- and sex-matched healthy controls and Cirrhosis and HCC (when combined as one group). 
+- TKI alone is not sex-matched with Controls and ICI but all HCC patients seems to reduce the bias
+
+```{r sexAge‐all‐groups, echo=FALSE, results='asis', fig.width=6, fig.height=5}
+for (group_col in group_cols[1]){
+  cat("\n\n## ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+
+  p <- plot_sex_age_distribution(data = metadata, 
+                               group_col = group_col, 
+                               age_col = "Age_group", 
+                               sex_col = "Sex_ctg", 
+                               custom_colors = sex_colors)
+  print(p)
+  #ggsave(paste("plots/sexAge-",group_col,".pdf",sep =""), plot = p, width = 6, height = 5, device = "pdf")
+}
+```
+
+
+
+
+```{r}
+kruskal.test(Age ~ group_test, data = metadata)
+#kruskal.test(Age ~ subgroups, data = metadata)
+
+table_sex <- table(metadata$Sex, metadata$group_test)
+chisq.test(table_sex)
+```
+
+
+
+# Antibody Epitope Repertoire of Samples {.tabset}
+
+Antibody epitope repertoires of all individuals or per group recognize private (occurring in single individuals) and public (shared in all of the cohort) antigens.
+
+- Plots shows how often a number of peptides is present only in certain number of individuals per group comparisons.
+
+- Highlighting 5% prevalence filter and the amount of peptides that remain after the filter.
+
+
+```{r distributionEnriched‐all‐groups, echo=FALSE, results='asis', fig.height=4.5, fig.width=4.5}
+for (group_col in group_cols[1]){
+  cat("\n\n## ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+
+  p <- plot_enrichment_counts(
+    features_target      = features_target,
+    group_col            = group_col,
+    group_cols           = group_cols,
+    prevalence_threshold = 0,
+    custom_colors        = custom_colors,
+    binwidth             = 0.5
+  )
+  print(p)
+  #ggsave(paste("plots/distributionCounts-",group_col,".pdf",sep =""), plot = p, width = 4.5, height = 4.5, device = "pdf")
+}
+```
+
+
+
+```{r}
+counts_list <- generate_taxa_count_tables(lib_metadata_df, exist)
+rank_levels <- rev(names(counts_list))[1:5]  # e.g. c("species","genus",…)
+```
+
+
+# Alpha Diversity  {.tabset}
+
+-Richness: the absolute number of antibody-bound peptides/taxa rank per individual between groups.
+-Shannon: A given taxonomic rank diversity of Ig repertoires of antibody-bound peptides per individual between groups.
+
+
+```{r alpha‐peptides, results='asis', fig.width=4, fig.height=4}
+# define the ranks you want to iterate over
+rank_level <- "peptides"
+cat("\n\n## ", tools::toTitleCase(rank_level), " {.tabset} \n\n")
+cat("\n\n### ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+counts <- exist
+label_y <- paste("# of enriched peptides")
+sample_meta  <- metadata %>% select(SampleName=SampleName, all_of(group_col))
+alpha_df     <- compute_alpha_diversity(counts, sample_meta, group_col)
+p1 <- plot_groups_boxplots(data = alpha_df, 
+                              group_col = "Group", 
+                              values_col = "Richness",
+                              custom_colors = custom_colors, 
+                              label_axis = c(NA, label_y), 
+                              sig_level = 1,label_format = "p.format")
+p1
+#ggsave(paste("plots/Figure1/Fig1_C4_EnrichmentAlphaDiversity-","peptides","-",group_col,".pdf",sep =""), plot = p1, width = 4, height = 4, device = "pdf")
+```
+
+```{r alpha‐species-order, results='asis', fig.width=6, fig.height=4}
+# define the ranks you want to iterate over
+rank_level <- "species"
+cat("\n\n## ", tools::toTitleCase(rank_level), " {.tabset} \n\n")
+cat("\n\n### ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+counts <- counts_list[[rank_level]]
+sample_meta  <- metadata %>% select(SampleName=SampleName, all_of(group_col))
+alpha_df     <- compute_alpha_diversity(counts, sample_meta, group_col)
+p1 <- plot_groups_boxplots(data = alpha_df, 
+                              group_col = "Group", 
+                              values_col = "Shannon Diversity",
+                              custom_colors = custom_colors, 
+                              label_axis = c(NA, paste("Shannon Diversity")), 
+                              sig_level = 1,label_format = "p.format")
+
+rank_level <- "order"
+counts <- counts_list[[rank_level]]
+sample_meta  <- metadata %>% select(SampleName=SampleName, all_of(group_col))
+alpha_df     <- compute_alpha_diversity(counts, sample_meta, group_col)
+p2 <- plot_groups_boxplots(data = alpha_df, 
+                              group_col = "Group", 
+                              values_col = "Shannon Diversity",
+                              custom_colors = custom_colors, 
+                              label_axis = c(NA, paste("Shannon Diversity")), 
+                              sig_level = 1,label_format = "p.format") #p.format
+p <- p1+p2
+p
+#ggsave(paste("plots/Figure1/Fig1_D1_ShannonAlphaDiversity-","species","-",group_col,".pdf",sep =""), plot = p1, width = 3, height = 4, device = "pdf")
+#ggsave(paste("plots/Figure1/Fig1_D1_ShannonAlphaDiversity-","order","-",group_col,".pdf",sep =""), plot = p2, width = 3, height = 4, device = "pdf")
+#ggsave(paste("plots/Figure1/Fig1_D1_alphaDiversityCombined-","species_order","-",group_col,".pdf",sep =""), plot = p, width = 6, height = 4, device = "pdf")
+```
+
+
+# Beta Diversity {.tabset}
+Unsupervised learning model try to cluster groups based on bray-curtis or jaccard distances between individuals 
+
+- For each taxonomic rank (e.g. species, genus, …) Bray–Curtis dissimilarity is computed on the relative abundance taxonomic matrix and carried out a Principal Coordinates Analysis (PCoA/MDS). 
+
+- On the scatterplot, each point is a sample and the 95 % confidence ellipses show the group clustering. Below it, the boxplot displays each sample’s distance to its group centroid.
+
+- Tested for overall differences in community composition between groups with PERMANOVA, reporting the p-value in the plot. To check that any PERMANOVA result wasn’t driven by unequal dispersion, a permutation test on the multivariate dispersions (betadisper) was run.
+
+- Together, these panels tell you whether (a) the two groups occupy distinct regions of Bray–Curtis space (significant PERMANOVA) and (b) whether one group is more dispersed than the other (significant dispersion test).
+
+
+```{r beta‐species, results='asis', fig.width=7, fig.height=4}
+#source("hcc_utils.R")
+rank_level <- "species"
+counts <- counts_list[[rank_level]]
+
+cat("\n\n## ", tools::toTitleCase(rank_level), " {.tabset} \n\n")
+cat("\n\n### ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+
+sample_meta  <- metadata %>% 
+      select(SampleName=SampleName, all_of(group_col)) #%>% rename(Group = !!sym(group_col))  
+    
+beta_res <- compute_beta_diversity(counts, sample_meta, group_col = group_col, method = "bray", norm_method = "relative")
+
+    
+p1 <- plot_pcoa(beta_diversity= beta_res, custom_colors = custom_colors, ellipse = T, permutations = 1000, show_legend = F )
+p2 <- plot_beta_dispersion(beta_res$beta_dispersion, custom_colors)
+p <- p1 + p2 + plot_layout(widths = c(7, 3))
+p
+#ggsave(paste("plots/Figure1/PCoABetaDiversity-",rank_level,"-",group_col,".pdf",sep =""), plot = p1, width = 5, height = 3.8, device = "pdf")
+#ggsave(paste("plots/Figure1/DispBetaDiversity-",rank_level,"-",group_col,".pdf",sep =""), plot = p2, width = 5, height = 3.8, device = "pdf")
+#ggsave(paste("plots/Figure1/BetaDiversityCombined-",rank_level,"-",group_col,".pdf",sep =""), plot = p, width = 7, height = 4, device = "pdf")
+```
+
+
+
+# Etiology
+
+```{r beta‐etiology, results='asis', fig.width=24, fig.height=4}
+#source("hcc_utils.R")
+
+rank_level <- "species"
+cat("\n\n## ", tools::toTitleCase(rank_level), " {.tabset} \n\n")
+  
+counts <- counts_list[[rank_level]]
+cat("\n\n### ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+
+sample_meta  <- metadata %>% 
+  select(SampleName=SampleName, all_of(group_col), Etiology=Etiology_group) %>% 
+  filter(!is.na(Etiology),  Etiology != "mixed", !!sym(group_col) != "Cirrhosis"
+         )
+sample_meta[[group_col]] <- droplevels(sample_meta[[group_col]])
+     
+# remove controls
+counts_tmp <- counts %>%
+  select(any_of(sample_meta$SampleName))
+    
+beta_res <- compute_beta_diversity(counts_tmp, sample_meta, group_col = "Etiology", method = "bray", norm_method = "relative")
+  
+p1 <- plot_pcoa(beta_diversity= beta_res, custom_colors = etiology_group_colors, ellipse = T, permutations = 1000, show_legend = F)  #+labs(fill  = "Etiology")
+p2 <- plot_beta_dispersion(beta_res$beta_dispersion, etiology_group_colors, sig_level = 0.05)
+p_hcc <- p1 + p2 + plot_layout(widths = c(7, 3))
+#ggsave(paste("plots/Figure1/Fig1_G_Etiology-includeMASH", rank_level,"-","HCC",".pdf",sep =""), plot = p_hcc, width = 8, height = 4, device = "pdf")
+
+####################################################################
+sample_meta  <- metadata %>% 
+  select(SampleName=SampleName, all_of(group_col), Etiology=Etiology_group) %>% 
+  filter(!is.na(Etiology),  Etiology != "mixed", !!sym(group_col) != "HCC"
+         )
+sample_meta[[group_col]] <- droplevels(sample_meta[[group_col]])
+     
+# remove controls
+counts_tmp <- counts %>%
+  select(any_of(sample_meta$SampleName))
+    
+beta_res <- compute_beta_diversity(counts_tmp, sample_meta, group_col = "Etiology", method = "bray", norm_method = "relative")
+  
+p1 <- plot_pcoa(beta_diversity= beta_res, custom_colors = etiology_group_colors, ellipse = T, permutations = 1000, show_legend = F)  #+labs(fill  = "Etiology")
+p2 <- plot_beta_dispersion(beta_res$beta_dispersion, etiology_group_colors, sig_level = 0.05)
+p_cirr <- p1 + p2 + plot_layout(widths = c(7, 3))
+#ggsave(paste("plots/Figure1/FigS2_C_Etiology-includeMASH", rank_level,"-","Cirrhosis",".pdf",sep =""), plot = p_cirr, width = 8, height = 4, device = "pdf")
+
+################################################################
+sample_meta  <- metadata %>% 
+  select(SampleName=SampleName, all_of(group_col), Etiology=Etiology_group) %>% 
+  filter(!is.na(Etiology),  Etiology != "mixed"
+         )
+sample_meta[[group_col]] <- droplevels(sample_meta[[group_col]])
+     
+# remove controls
+counts_tmp <- counts %>%
+  select(any_of(sample_meta$SampleName))
+    
+beta_res <- compute_beta_diversity(counts_tmp, sample_meta, group_col = "Etiology", method = "bray", norm_method = "relative")
+  
+p1 <- plot_pcoa(beta_diversity= beta_res, custom_colors = etiology_group_colors, ellipse = T, permutations = 1000, show_legend = F)  #+labs(fill  = "Etiology")
+p2 <- plot_beta_dispersion(beta_res$beta_dispersion, etiology_group_colors, sig_level = 0.05)
+p_ld <- p1 + p2 + plot_layout(widths = c(7, 3))
+#ggsave(paste("plots/Figure1/Fig1_H_Etiology-includeMASH", rank_level,"-","LiverDiseases",".pdf",sep =""), plot = p_ld, width = 8, height = 4, device = "pdf")
+
+p_hcc | p_cirr | p_ld
+```
+
+
+
+
+# Significant Taxa Between Groups {.tabset}
+
+```{r significant‐all‐ranks, results='asis', fig.width=8, fig.height=8}
+cat("\n\n## ", tools::toTitleCase(rank_level), " {.tabset} \n\n")
+  
+prep <- prep_taxa_stats(
+    rank        = rank_level,
+    group_col   = group_cols[1],
+    counts_list = counts_list,
+    metadata    = metadata,
+    top_n       = 12,
+    order_by    = "All"    # or specify e.g. "Controls"
+  )
+  
+  
+prep$rank_colors["Cytomegalovirus humanbeta5"] <- "#008000"
+prep$rank_colors["Enterovirus C"] <- "#800000"
+prep$rank_colors["Rhinovirus A"] <- "#800000"
+prep$rank_colors["Hepacivirus hominis"] <- "gray2"
+prep$rank_colors["Norwalk virus"] <- "blue"
+bacteroidales_species <- c(
+  "Barnesiella intestinihominis",
+  "Parabacteroides distasonis",
+  "Parabacteroides merdae",
+  "Phocaeicola massiliensis")
+prep$rank_colors[bacteroidales_species] <- "#FFCC00"
+  
+prep$rel_abundance_filtered <- prep$rel_abundance_filtered %>% 
+    filter(!Rank %in% c("Faecalibacterium prausnitzii", "Haemophilus parainfluenzae"))%>%
+    droplevels()
+prep$pval_df <- prep$pval_df %>% 
+    filter(!Rank %in% c("Faecalibacterium prausnitzii", "Haemophilus parainfluenzae"))%>%
+    droplevels()
+prep$rank_colors <- prep$rank_colors[c(1:3,6:11)]
+
+cat("\n\n### ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+# get the max abundance
+max_ab <- max(prep$rel_abundance_filtered$Abundance, na.rm = TRUE)
+    
+# choose your nudge based on thresholds
+nudge_y <- case_when(
+      max_ab <= 0.1   ~ -1.0,
+      max_ab <= 0.15  ~ -0.8,
+      max_ab <= 0.2   ~ -0.7,
+      max_ab <= 0.3   ~ -0.5,
+      TRUE           ~ -0.3    # a sensible default if >0.3
+    )
+    
+prep$pval_df$p.adj.label = sapply(prep$pval_df$p.adj.label, format_pval)
+p1 <- plot_taxa_violin(prep, ncol = 3, nudge_y = -1.25)#nudge_y)
+
+
+short_strip_labels <- c(
+  "Cytomegalovirus humanbeta5"   = "CMV",
+  "Barnesiella intestinihominis" = "B. intestinihominis",
+  "Rhinovirus A"                 = "Rhinovirus A",
+  "Phocaeicola massiliensis"     = "P. massiliensis",
+  "Parabacteroides merdae"       = "P. merdae",
+  "Parabacteroides distasonis"   = "P. distasonis",
+  "Enterovirus C"                = "Enterovirus C",
+  "Faecalibacterium prausnitzii" = "F. prausnitzii",
+  "Haemophilus parainfluenzae"   = "H. parainfluenzae",
+  "Norwalk virus"                = "Norovirus",
+  "Hepacivirus hominis"          = "HCV"
+)
+
+p1$facet$params$labeller <- as_labeller(short_strip_labels)
+p1
+#ggsave(paste("plots/Figure1/Fig1_F_TaxaPlot-",rank_level,"-",group_col,".pdf",sep =""), plot = p1, width = 4, height = 8, device = "pdf")
+```
+
+
+
+
+# Peptide Comparison Between Groups {.tabset}
+
+
+```{r}
+num_samples_per_group <- list()
+for (group_col in group_cols2[c(1,3,4,5,6,7)]) { 
+  num_samples_per_group[[group_col]] <- metadata %>%
+    filter(!is.na(!!sym(group_col))) %>%  # Filter out NA values in the group_test column
+    group_by(!!sym(group_col)) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    tibble::deframe()  # Convert the summarized result to a named vector (group -> count)
+}
+
+## reorder group test ???
+level_map <- list(
+  group_test    = c("Controls", "Cirrhosis", "HCC")
+)
+
+metadata_reorder <- metadata %>%
+  # for each of the group_cols, re-factor in one go
+  mutate(
+    across(
+    all_of(c(group_cols[1])),
+    ~ factor(.x, levels = level_map[[cur_column()]]),
+    .names = "{.col}"
+    )
+  )
+
+
+features_target <- as.data.frame(t(exist)) %>%
+  tibble::rownames_to_column("SampleName")%>%
+  #dplyr::left_join(metadata %>% select(any_of(c("SampleName", group_cols))), by = "SampleName")
+  dplyr::left_join(metadata_reorder %>% select(any_of(c("SampleName", group_cols))), by = "SampleName")
+
+percentage_group_test_list <- list()
+for (group_col in group_cols2[c(1,3,4,5,6,7)]){
+  percentage_group_test_list[[group_col]] <-  get_count_percentage_df(
+    features_target      = features_target,
+    group_col            = group_col,
+    group_cols           = group_cols,
+    lib_metadata_df      = lib_metadata_df,
+    prevalence_threshold = 0)
+}
+```
+
+
+
+## Etiology HCV hits
+
+```{r hcv-hits, results='asis', fig.width=6, fig.height=6}
+
+df <- percentage_group_test_list$Etiology_diseases %>%
+  filter(species == "Hepacivirus hominis")
+
+
+# pick count columns automatically
+count_cols <- names(df) %>% str_subset("_count$")
+count_cols <- str_replace(count_cols, "_count$", "")
+ 
+df_long <- df %>%
+  select(Peptide, all_of(count_cols)) %>%
+  pivot_longer(-Peptide, names_to = "Group", values_to = "Count") %>%
+  mutate(
+    #Group = str_replace(Group, "_count$", ""),
+    # optional: order columns with HCV first
+    Group = factor(Group, levels = c(
+      "HCC-HCV", "Cirr-HCV", "HCC-HCV-ALD", "Cirr-HCV-ALD",
+      "HCC-HBV","Cirr-HBV","HCC alcohol", "Cirr alcohol",
+      "HCC MASH", "Cirr MASH", "HCC other", "Cirr other"
+    )),
+    LogCount = log1p(Count)
+  )
+
+# order peptides by total HCV signal (nice for storytelling)
+hcv_groups <- c("HCC-HCV", "Cirr-HCV", "HCC-HCV-ALD", "Cirr-HCV-ALD")
+
+peptide_order <- df_long %>%
+  filter(Group %in% hcv_groups) %>%
+  group_by(Peptide) %>%
+  summarise(HCV_total = sum(Count, na.rm = TRUE), .groups="drop") %>%
+  arrange(desc(HCV_total)) %>%
+  pull(Peptide)
+
+df_long <- df_long %>%
+  mutate(Peptide = factor(Peptide, levels = peptide_order))
+
+p_hcv_heat <- ggplot(df_long, aes(x = Group, y = Peptide, fill = Count)) +
+  geom_tile() +
+  scale_fill_viridis(
+    option = "C",          # very clear contrast
+    direction = -1,        # high % = bright
+      trans = "sqrt",
+    limits = c(0, 100),
+    name = "Individuals\npositive (%)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(
+          hjust = 0.5,      
+          face = "bold",
+          size = 12
+          )) +
+  labs(x = NULL, y = NULL, title = "Enriched HCV peptides")
+```
+
+```{r hcv-hits-perc, results='asis', fig.width=7, fig.height=4}
+# ---- inputs ----
+hcv_peptides <- percentage_group_test_list$Etiology_diseases %>%
+  filter(species == "Hepacivirus hominis") %>%
+  pull(Peptide) %>%
+  unique()
+
+# keep only peptides that exist in features_target
+hcv_peptides <- intersect(hcv_peptides, colnames(features_target))
+
+etiology_levels <- c("HCV", "HCV-ALD", "HBV", "alcohol", "MASH", "other")
+
+breaks <- c(0, 1, 3, 6, 11, 21, Inf)
+labels <- c("0", "1–2", "3–5", "6–10", "11–20", "≥21")
+
+# ---- build plotting table ----
+df_plot <- features_target %>%
+  mutate(
+    n_hcv_bound = rowSums(across(all_of(hcv_peptides)), na.rm = TRUE),
+    Disease = if_else(str_detect(Etiology_diseases, "^HCC"), "HCC", "Cirr"),
+    Etiology = Etiology_diseases %>%
+      str_remove("^HCC[ -]|^Cirr[ -]") %>%  # handles both "HCC-" and "HCC "
+      str_trim(),
+    n_bin = cut(n_hcv_bound, breaks = breaks, labels = labels, right = FALSE)
+  ) %>%
+  filter(!is.na(Etiology), Etiology %in% etiology_levels) %>% # drop NA + keep desired etiologies
+  count(Disease, Etiology, n_bin, name = "n") %>%
+  group_by(Disease, Etiology) %>%
+  mutate(pct = 100 * n / sum(n)) %>%
+  ungroup() %>%
+  #filter(n_bin != "0") %>%  # remove zero bin (optional)
+  mutate(
+    Etiology = factor(Etiology, levels = etiology_levels),
+    Disease = recode(Disease, "Cirr" = "Cirrhosis"),
+    Disease  = factor(Disease, levels = c("HCC", "Cirrhosis")),   # optional row order
+    n_bin    = factor(n_bin, levels = labels) #labels[-1]            # keep bin order after dropping "0"
+  )
+
+
+p_hcv_hist <- ggplot(df_plot, aes(x = n_bin, y = pct, fill = Etiology)) +
+  geom_col(width = 0.9) +
+  geom_text(
+    aes(label = paste0("n=", n)),
+    vjust = -0.2,          # put label slightly above the bar
+    size = 2.8
+  ) +
+  facet_grid(Disease ~ Etiology, drop = TRUE, switch = "y") +
+  scale_y_continuous(
+    limits = c(0, 110),    # headroom above 100%
+    breaks = c(0, 25, 50, 75, 100),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  scale_fill_manual(
+    values = c(
+      "HCV"      = "#1b9e77",
+      "HCV-ALD"  = "#d95f02",
+      "HBV"      = "#7570b3",
+      "alcohol"  = "gold3",
+      "MASH"     = "#66a61e",
+      "other"    = "#a6761d"
+    ),
+    guide = "none"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    strip.background = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(x = "Number of HCV peptides bound", y = "Individuals (%)")
+```
+
+## Etiology HBV hits
+
+
+```{r hbv-hits, results='asis', fig.width=6, fig.height=6}
+
+df <- percentage_group_test_list$Etiology_diseases %>%
+  filter(species == "Hepatitis B virus")
+
+# pick count columns automatically
+count_cols <- names(df) %>% str_subset("_count$")
+count_cols <- str_replace(count_cols, "_count$", "")
+ 
+df_long <- df %>%
+  select(Peptide, all_of(count_cols)) %>%
+  pivot_longer(-Peptide, names_to = "Group", values_to = "Count") %>%
+  mutate(
+    #Group = str_replace(Group, "_count$", ""),
+    # optional: order columns with HCV first
+    Group = factor(Group, levels = c(
+      "HCC-HCV", "Cirr-HCV", "HCC-HCV-ALD", "Cirr-HCV-ALD",
+      "HCC-HBV","Cirr-HBV","HCC alcohol", "Cirr alcohol",
+      "HCC MASH", "Cirr MASH", "HCC other", "Cirr other"
+    )),
+    LogCount = log1p(Count)
+  )
+
+# order peptides by total HCV signal (nice for storytelling)
+hcv_groups <- c("HCC-HCV", "Cirr-HCV", "HCC-HCV-ALD", "Cirr-HCV-ALD")
+
+peptide_order <- df_long %>%
+  filter(Group %in% hcv_groups) %>%
+  group_by(Peptide) %>%
+  summarise(HCV_total = sum(Count, na.rm = TRUE), .groups="drop") %>%
+  arrange(desc(HCV_total)) %>%
+  pull(Peptide)
+
+df_long <- df_long %>%
+  mutate(Peptide = factor(Peptide, levels = peptide_order))
+
+p_hbv_heat <- ggplot(df_long, aes(x = Group, y = Peptide, fill = Count)) +
+  geom_tile() +
+  scale_fill_viridis(
+    option = "C",          # very clear contrast
+    direction = -1,        # high % = bright
+      trans = "sqrt",
+    limits = c(0, 100),
+    name = "Individuals\npositive (%)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(
+          hjust = 0.5,      
+          face = "bold",
+          size = 12
+          )) +
+  labs(x = NULL, y = NULL, title = "Enriched HBV peptides")
+```
+
+```{r hbv-hits-perc, results='asis', fig.width=5, fig.height=4}
+# ---- inputs ----
+hbv_peptides <- percentage_group_test_list$Etiology_diseases %>%
+  filter(species == "Hepatitis B virus") %>%
+  pull(Peptide) %>%
+  unique()
+
+# keep only peptides that exist in features_target
+hbv_peptides <- intersect(hbv_peptides, colnames(features_target))
+
+etiology_levels <- c("HBV", "HCV", "HCV-ALD", "alcohol", "MASH", "other")
+
+breaks <- c(0, 1, 3, 6, 11, 21, Inf)
+labels <- c("0", "1–2", "3–5", "6–10", "11–20", "≥21")
+
+# ---- build plotting table ----
+df_plot <- features_target %>%
+  mutate(
+    n_hcv_bound = rowSums(across(all_of(hbv_peptides)), na.rm = TRUE),
+    Disease = if_else(str_detect(Etiology_diseases, "^HCC"), "HCC", "Cirr"),
+    Etiology = Etiology_diseases %>%
+      str_remove("^HCC[ -]|^Cirr[ -]") %>%  # handles both "HCC-" and "HCC "
+      str_trim(),
+    n_bin = cut(n_hcv_bound, breaks = breaks, labels = labels, right = FALSE)
+  ) %>%
+  filter(!is.na(Etiology), Etiology %in% etiology_levels) %>% # drop NA + keep desired etiologies
+  count(Disease, Etiology, n_bin, name = "n") %>%
+  group_by(Disease, Etiology) %>%
+  mutate(pct = 100 * n / sum(n)) %>%
+  ungroup() %>%
+  #filter(n_bin != "0") %>%  # remove zero bin (optional)
+  mutate(
+    Etiology = factor(Etiology, levels = etiology_levels),
+    Disease = recode(Disease, "Cirr" = "Cirrhosis"),
+    Disease  = factor(Disease, levels = c("HCC", "Cirrhosis")),   # optional row order
+    n_bin    = factor(n_bin, levels = labels) #  labels[-1]            # keep bin order after dropping "0"
+  )
+
+# ---- plot ----
+p_hbv_hist <- ggplot(df_plot, aes(x = n_bin, y = pct, fill = Etiology)) +
+  geom_col(width = 0.9) +
+  geom_text(
+    aes(label = paste0("n=", n)),
+    vjust = -0.2,          # put label slightly above the bar
+    size = 2.5
+  ) +
+  facet_grid(Disease ~ Etiology, drop = TRUE, switch = "y") +
+  scale_y_continuous(
+    limits = c(0, 110),    # headroom above 100%
+    breaks = c(0, 25, 50, 75, 100),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  scale_fill_manual(
+    values = c(
+      "HCV"      = "#1b9e77",
+      "HCV-ALD"  = "#d95f02",
+      "HBV"      = "#7570b3",
+      "alcohol"  = "gold3",
+      "MASH"     = "#66a61e",
+      "other"    = "#a6761d"
+    ),
+    guide = "none"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    strip.background = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(x = "Number of HBV peptides bound", y = "Individuals (%)")
+```
+
+
+```{r viral-plot, results='asis', fig.width=8.8, fig.height=10}
+
+
+# --- remove redundant axis titles for alignment ---
+p_hcv_heat2 <- p_hcv_heat +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+# 
+# p_hbv_heat2 <- p_hbv_heat +
+#   theme(
+#     axis.title.x = element_blank(),
+#     axis.title.y = element_blank()
+#  )
+
+# p_hbv_hist2 <- p_hbv_hist +
+#   theme(axis.title.y = element_blank())
+
+# --- multi-panel layout with visual hierarchy ---
+fig <-
+  (p_hcv_heat2  / #| p_hbv_heat2)
+   p_hcv_hist  ) + #| p_hbv_hist2
+  plot_layout(
+    #widths  = c(1.25, 1),   # HCV column slightly wider
+    heights = c(1.6, 0.9),  # heatmaps taller than histograms
+    guides  = "collect"     # align legends
+  ) +
+  plot_annotation(tag_levels = "A") &   # panel labels A–D
+  theme(
+    legend.position = "right",
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+# ggsave(filename = "plots/Figure3/supFig_viralHits.pdf", plot = fig, width = 8.9, height = 10, dpi = 600, device = "pdf")
+# ggsave(filename = "plots/Figure3/supFig_viralHits.png", plot = fig, width = 8.9, height = 10, dpi = 600, device = "png")
+# ggsave(filename = "plots/Figure3/supFig_viralHits.jpeg", plot = fig, width = 8.9, height = 10, dpi = 600, device = "jpeg")
+fig
+```
+
+```{r}
+#lib_metadata_df <- readRDS("../../phipseq_report-generator/library_meta/combined_libraries_with_lineages_important_info_nonAAseq.rds")
+# peptide_meta <- read.csv("/home/creyna/Vogl-lab_Projects_git/Annotations/combined_libraries_with_lineages_important_info.csv", check.names = F, header = T) %>%
+#   rename(Peptide = 1) %>%  # rename first column to "Peptide"
+#   select(Peptide, pos, len_seq, signalp6_slow, aa_seq)  # select only relevant columns
+# 
+# wb <- createWorkbook()
+# addWorksheet(wb, "mainCohorts")
+# writeData(wb, "mainCohorts", percentage_group_test_list$group_test%>%
+#   left_join(peptide_meta, by = "Peptide") %>% 
+#   relocate(pos, len_seq, .after = Peptide))
+# # add second sheet
+# addWorksheet(wb, "controlDiseases")
+# writeData(wb, "controlDiseases", percentage_group_test_list$control_diseases%>%
+#   left_join(peptide_meta, by = "Peptide") %>% 
+#   relocate(pos, len_seq, .after = Peptide))
+# #
+# addWorksheet(wb, "etiologyHCC")
+# writeData(wb, "etiologyHCC", percentage_group_test_list$Etiology_group_hcc%>%
+#   left_join(peptide_meta, by = "Peptide") %>% 
+#   relocate(pos, len_seq, .after = Peptide))
+# #
+# addWorksheet(wb, "etiologyCirrhosis")
+# writeData(wb, "etiologyCirrhosis", percentage_group_test_list$Etiology_group_cirr%>%
+#   left_join(peptide_meta, by = "Peptide") %>% 
+#   relocate(pos, len_seq, .after = Peptide))
+# #
+# addWorksheet(wb, "combinedEtiologies")
+# writeData(wb, "combinedEtiologies", percentage_group_test_list$Etiology_group%>%
+#   left_join(peptide_meta, by = "Peptide") %>% 
+#   relocate(pos, len_seq, .after = Peptide))
+# 
+# saveWorkbook(wb, "plots/Figure2/comparisons_allPeptides.xlsx", overwrite = TRUE)
+```
+
+```{r}
+prevalence_threshold <- 5 #5% for non etilogy or combined etiology
+comparison_group_tests <- group_test_analysis(percentage_group_test_list[c(1,2,5)], num_samples_per_group[c(1,2,5)], prevalence_threshold = prevalence_threshold)
+
+prevalence_threshold <- 10 #10% for etiology cirr or hcc
+comparison_group_tests2 <- group_test_analysis(percentage_group_test_list[c(3,4)], num_samples_per_group[c(3,4)], prevalence_threshold = prevalence_threshold)
+
+comparison_group_tests$Etiology_group_hcc <- comparison_group_tests2$Etiology_group_hcc
+comparison_group_tests$Etiology_group_cirr <- comparison_group_tests2$Etiology_group_cirr
+
+rm(comparison_group_tests2)
+rm(percentage_group_test_list)
+```
+
+
+
+```{r}
+# helper: Excel-safe sheet names (<=31 chars, no []:*?/\)
+# sanitize_sheet <- function(x) {
+#   y <- gsub("[\\[\\]\\:\\*\\?\\/\\\\]", "-", x)  # replace forbidden chars
+#   y <- gsub(" ", "", y)                          # remove spaces
+#   if (nchar(y) > 31) {
+#     y <- substr(y, 1, 31)                        # truncate safely
+#   }
+#   y
+# }
+# 
+# prot_seq <- readRDS("/home/creyna/Vogl-lab_Projects_git/Annotations/protein-peptide_seq_agilent-twist.rds")
+# for (group_col in group_cols2[c(1,3,4,5,6)]) {
+#   #group_col <- group_cols2[1]
+#   # ---- before the inner loop (one workbook per group_col) ----
+#   wb <- createWorkbook()
+# 
+#   # keep track to avoid duplicate sheet names
+#   seen_sheets <- character()
+#   comparisons <- names(comparison_group_tests[[group_col]])#[c(1,2,4)]
+# 
+#   for (comp_name in comparisons) {
+#   #comp_name <- comparisons[1]
+#   groups <- strsplit(comp_name, "_vs_")[[1]]
+#   group1 <- groups[1]
+#   group2 <- groups[2]
+# 
+#   N1 <- num_samples_per_group[[group_col]][[group1]]
+#   N2 <- num_samples_per_group[[group_col]][[group2]]
+# 
+#   comparison_df <- comparison_group_tests[[group_col]][[comp_name]]$comparison_df
+#   
+#   # ---- write CSV (your existing line) ----
+#   output_table_csv <- paste0("plots/Figure2/table_peptidesSignificance_",
+#                              group_col,"_", comp_name, ".csv")
+#   readr::write_csv(comparison_df, output_table_csv)
+# 
+#   # ---- build cleaned table for Excel sheet ----
+#   # identify "other" groups from your known set of groups
+#   all_groups <- names(num_samples_per_group[[group_col]])
+#   other_groups <- setdiff(all_groups, c(group1, group2))
+# 
+#   cols_to_drop <- intersect(
+#     names(comparison_df),
+#     c(other_groups, paste0(other_groups, "_count"))
+#   )
+# 
+#   df_clean <- comparison_df %>% select(-any_of(cols_to_drop)) %>%
+#   left_join(peptide_meta, by = "Peptide") %>% 
+#   relocate(pos, len_seq, .after = Peptide) %>% 
+#   left_join(prot_seq[c(1,3)], by = "Peptide") %>% 
+#   arrange(pvals_bh, desc(ratio))
+#   
+#   # ---- add as a sheet ----
+#   sheet_name <- sanitize_sheet(comp_name)
+#   # ensure uniqueness if two names collapse after sanitization/trim
+#   if (sheet_name %in% seen_sheets)
+#     sheet_name <- make.unique(c(seen_sheets, sheet_name), sep = "_")[length(seen_sheets) + 1]
+#   seen_sheets <- c(seen_sheets, sheet_name)
+# 
+#   addWorksheet(wb, sheet_name)
+#   writeData(wb, sheet_name, df_clean)
+#   freezePane(wb, sheet = sheet_name, firstRow = TRUE)
+#   #setColWidths(wb, sheet = sheet_name, cols = 1:ncol(df_clean), widths = "auto")
+#   }
+#   # ---- after the inner loop: save one Excel per group_col ----
+#   output_xlsx <- paste0("plots/Figure2/table_pairwiseComparisons_peptidesSignificance_", group_col, ".xlsx")
+#   saveWorkbook(wb, output_xlsx, overwrite = TRUE)
+# }
+```
+
+
+```{r}
+# sheet <- read.xlsx("plots/Figure3/table_pairwiseComparisons_peptidesSignificance_Etiology_group_hcc.xlsx", sheet = 1)
+# as.data.frame(sheet %>% filter(pvals_not_adj <= 0.05 & ratio <0.1) %>% count(species, sort=T))
+```
+
+
+## Significance (peptide level)   {.tabset}
+
+-A 5% or 10% prevalence filter was applied where at least one group has to contain 5% or 10% of a peptide to pass
+
+- Scatterplots show in green peptides that are significant before multiple testing correction and in red peptides that are significant after correction (BH)
+
+- raw pvals were calculated using Fisher test comparing peptide prevalence between groups and
+
+
+### Scatterplot {.tabset}
+
+#### Controls vs Cirrhosis vs HCC
+
+```{r, results='asis', fig.height=10, fig.width=10}
+group_col <- names(comparison_group_tests)[1]
+p_list <- list()
+all_plots <- lapply(comparison_group_tests[[group_col]], function(x) {
+  # Adjusting the plot margins to avoid hover text cropping
+  x$plot
+})
+
+p <- (all_plots$Controls_vs_HCC + all_plots$Cirrhosis_vs_HCC) / (all_plots$Controls_vs_Cirrhosis + comparison_group_tests$control_diseases$`Controls_vs_Liver Diseases`$plot)
+#ggsave(paste("plots/Figure2/FigS3_scatterPlot-peptides","-",group_col,".pdf",sep =""), plot = p, width = 10, height = 10, device = "pdf")
+p
+```
+
+
+### Volcano plot {.tabset}
+
+- A different way to visualize  significant peptides based on the prevalence ratio of two groups and corresponding pvalues (before multiple test correction)
+
+#### Controls vs Cirrhosis vs HCC
+
+```{r, results='asis'}
+group_col <- group_cols[1]
+volcano_plots <- list()
+comparisons <- names(comparison_group_tests[[group_col]])
+for (comp_name in comparisons) {
+  #comp_name <- comparisons[1]
+  groups <- strsplit(comp_name, "_vs_")[[1]]
+  group1 <- groups[1]
+  group2 <- groups[2]
+  comparison_df <- comparison_group_tests[[group_col]][[comp_name]]$comparison_df
+  p <- make_interactive_volcano(comparison_df = comparison_df,
+                                group1 = group1, group2 = group2, fc_cut = 1, p_cut = 0.05,
+                                interactive = T)
+  volcano_plots[[paste0(group1, "_vs_", group2)]] <- list(plot = p %>% htmltools::div(style = "margin-bottom: 50px;"))
+  # ggsave(paste0(group_col, "_", comp_name, "_volcano_plot.png"), p)
+}
+print(htmltools::tagList(volcano_plots))
+```
+
+
+#### Controls vs Liver Diseases
+
+
+```{r, results='asis'}
+group_col <- group_cols2[3]
+volcano_plots <- list()
+comparisons <- names(comparison_group_tests[[group_col]])
+for (comp_name in comparisons) {
+  #comp_name <- comparisons[1]
+  groups <- strsplit(comp_name, "_vs_")[[1]]
+  group1 <- groups[1]
+  group2 <- groups[2]
+  comparison_df <- comparison_group_tests[[group_col]][[comp_name]]$comparison_df
+  p <- make_interactive_volcano(comparison_df = comparison_df,
+                                group1 = group1, group2 = group2, fc_cut = 1, p_cut = 0.05,
+                                interactive = T)
+  volcano_plots[[paste0(group1, "_vs_", group2)]] <- list(plot = p %>% htmltools::div(style = "margin-bottom: 50px;"))
+  # ggsave(paste0(group_col, "_", comp_name, "_volcano_plot.png"), p)
+}
+print(htmltools::tagList(volcano_plots))
+```
+
+
+
+
+## Significance (Taxa level)  {.tabset}
+
+- Highlighting interesting virus/bacteria groups at rank level that seems to appear significantly overrepresented when compared to the complete library
+
+- Adjusted pvals (BH) were calculated using MW test comparing the ratio of group1/group2 of the bacteria/virus rank of interest and the ratio of group1/group2 of the complete library (excluding the group of interest)
+
+
+
+### Scatterplot  {.tabset}
+
+
+```{r sig-scatter‐all‐ranks, results='asis', fig.height=6, fig.width=6}
+results_list <- list()
+#########################################
+#  Only run if you want to define the rules for custom grouping if you want to include taxa from different lineages in one column
+########################################
+my_custom_rules <- data.frame(
+  lineage_col = c("order", "genus"),
+  taxa_name = c("Bacteroidales", "Enterovirus"),
+  stringsAsFactors = FALSE)
+#######################################
+
+# groups and patterns to find that group
+flags_to_patterns <- list(
+      "Shigella flexneri"         = "Shigella flexneri",
+          "CMV"   = "Cytomegalovirus humanbeta5",
+  "EBV"   = "Lymphocryptovirus humangamma4",
+      "HCV"         = "Hepacivirus hominis",
+        "Bacteroidales"         = "Bacteroidales",
+  "Enterovirus"           = "Enterovirus", 
+  "Norovirus" =  "Norwalk virus",
+  "S. aureus" = "Staphylococcus aureus"
+)
+
+flags <- c(names(flags_to_patterns)) # no extra annotation
+taxa_to_plot <- unlist(flags_to_patterns)
+col_taxa <- c(
+  "S. aureus" = "#FF00FF", 
+  "Enterovirus"           = "#800000", 
+  "Bacteroidales"        = "#FFCC00", 
+  "CMV"   = "#008000",
+  "EBV"   = "#00FFFF",
+  "HCV"         = "gray2", 
+  "Shigella flexneri"         = "blue",
+  "Norovirus" = "greenyellow"
+  ) 
+
+
+legend_order = c(
+  "Bacteroidales",
+  "Shigella flexneri",
+  "S. aureus",
+  "Enterovirus",
+  "Norovirus",
+  "HCV",
+  "EBV",
+  "CMV"
+)
+
+
+for(rank_level in rank_levels[1]) {
+  #rank_level <- "species"
+  cat("\n\n#### ", "Species", " {.tabset} \n\n")
+  for (group_col in group_cols2[c(1,3,4,5,6)]) {
+    #group_col <- group_cols2[1] #for negative control fig2
+    cat("\n\n##### ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+    scatter_plots <- list()
+    if (group_col %in% c("Etiology_group_hcc", "Etiology_group_cirr", "Etiology_group")){
+      comparisons <- names(comparison_group_tests[[group_col]])[c(1,2,4)]
+      } else {
+      comparisons <- names(comparison_group_tests[[group_col]])
+      }
+    for (comp_name in comparisons) {
+      #comp_name <- comparisons[1]
+      groups        <- strsplit(comp_name, "_vs_")[[1]]
+      group1        <- groups[1]
+      group2        <- groups[2]
+      N1 <- num_samples_per_group[[group_col]][[group1]]
+      N2 <- num_samples_per_group[[group_col]][[group2]]
+      comparison_df <- comparison_group_tests[[group_col]][[comp_name]]$comparison_df
+      
+      # Create the new custom column that includes taxa from different lineages
+      comparison_df_custom <- create_flexible_taxa_column(
+      df = comparison_df,
+      default_lineage_col = "species", # Default is species level
+      custom_rules = my_custom_rules,
+      new_col_name = "newTaxaCol")
+      
+      
+      # Run statistical analysis using a lineage column (can be species, order or the new generated taxa col)
+      pvals_df <- get_top_significant_taxa_df(
+      comparison_df = comparison_df_custom,
+      lineage_col = "newTaxaCol" # <--- here provide lineage col (e.g. species, order, genus or a new custom taxa column)
+      )
+
+      pvals_taxa <- pvals_df %>%
+        dplyr::filter(newTaxaCol %in% taxa_to_plot) %>%
+        dplyr::mutate(newTaxaCol = factor(newTaxaCol, levels = taxa_to_plot)) %>%
+        dplyr::arrange(newTaxaCol) %>% 
+        pull(p.adj)
+      for(flag in flags){
+        patterns <-  flags_to_patterns[[flag]]
+        # (A) Add a new TRUE/FALSE column "flag" by matching those patterns:
+        comparison_df <- comparison_df %>%
+          add_exact_flag(
+            new_flag    = flag,
+            patterns    = patterns,
+            target_cols = c(rank_levels, "Description")
+          )
+      }
+
+      #source("hcc_utils.R")
+      p <- make_interactive_scatterplot(comparison_df = comparison_df,
+                             group1 = group1, group2 = group2, N = c(N1,N2),
+                             highlight_cols   = rev(flags), 
+                             highlight_colors = col_taxa,
+                             reverse_legend = F,
+                             legend_order =  legend_order,
+                             pvals_adj = rev(pvals_taxa),
+                             default_color    = "gray70", 
+                             interactive = F)
+      print(p)
+      #ggsave(paste("plots/prevalencePlots/scatterplot-",group_col,"-", comp_name,".pdf",sep =""), plot = p, width = 6, height = 6, device = "pdf")
+      scatter_plots[[comp_name]] <- list(plot = p)
+    }
+  }
+}
+```
+
+
+
+
+# Subgroups in Antigen Library {.tabset}
+
+- Represent the main antigen subgroups ratio distribution within the library (including bacteria/virus of interest) that exhibits differential binding between groups.
+
+- If ratio is positive between group1/group2, this indicate that group2 (eg. HCC) shows more representation of that peptide subgroup than group1 (e.g Controls)
+
+
+```{r sig-subgroups‐all‐ranks, results='asis', fig.width=6, fig.height=6}
+# groups and patterns to find that group
+flags_to_patterns <- list(
+          "Bacteroidales"         = "Bacteroidales",
+      "Shigella flexneri"         = "Shigella flexneri",
+        "S. aureus" = "Staphylococcus aureus",
+        "Enterovirus"           = "Enterovirus", 
+        "Norovirus" =  "Norwalk virus",
+            "HCV"         = "Hepacivirus hominis",
+  "EBV"   = "Lymphocryptovirus humangamma4",
+            "CMV"   = "Cytomegalovirus humanbeta5"
+)
+
+flags <- c(names(flags_to_patterns)) # no extra annotation
+taxa_to_plot <- unlist(flags_to_patterns)
+col_taxa <- c(
+  "S. aureus" = "#FF00FF", 
+  "Enterovirus"           = "#800000", 
+  "Bacteroidales"        = "#FFCC00", 
+  "CMV"   = "#008000",
+  "EBV"   = "#00FFFF",
+  "HCV"         = "gray2", 
+  "Shigella flexneri"         = "blue",
+  "Norovirus" = "greenyellow"
+  ) 
+
+
+
+
+
+for (rank_level in rank_levels[1]){
+  cat("\n\n## ", tools::toTitleCase(rank_level), " {.tabset} \n\n")
+  for (group_col in group_cols2[c(1,3,4,5,6)]) {
+    cat("\n\n### ", tools::toTitleCase(group_col), " {.tabset} \n\n")
+    if (group_col %in% c("Etiology_group_hcc", "Etiology_group_cirr", "Etiology_group")){
+      comparisons <- names(comparison_group_tests[[group_col]])[c(1,2,4)]
+    } else{
+      comparisons <- names(comparison_group_tests[[group_col]])
+    }
+    for (comp_name in comparisons) {
+      #comp_name <- comparisons[1]
+      groups <- strsplit(comp_name, "_vs_")[[1]]
+      group1 <- groups[1]
+      group2 <- groups[2]
+      comparison_df <- comparison_group_tests[[group_col]][[comp_name]]$comparison_df[
+        c("Peptide", rank_levels, "Description", group1, group2,
+          paste0(group1, "_count"), paste0(group2, "_count"), "ratio")
+      ]
+      
+      
+      flags    <- names(flags_to_patterns)
+      for(flag in flags){
+        patterns <- flags_to_patterns[[flag]]
+        col_flag <- comparison_df %>%
+          add_exact_flag(
+          new_flag    = flag,
+          patterns    = patterns,
+          target_cols = c(rank_levels, "Description")
+        )  %>% 
+          select(Peptide, all_of(flag)) %>%
+          distinct()
+        
+        # Add a new TRUE/FALSE column "flag" by matching those patterns:
+        subgroup_lib_df <- subgroup_lib_df %>% 
+          select(-any_of(flag)) %>%                # remove the column named by `flag` if it exists
+          left_join(col_flag, by = "Peptide")
+      }
+     
+      p_taxa <- plot_ratios_by_subgroup(comparison_df, group1, group2, subgroup_lib_df, 
+                                   subgroup_colors = col_taxa,
+                                   add_subgroups = flags,
+                                   prevalence_threshold = 0,#prevalence_threshold,
+                                   which_subgroups = "added",
+                                   x_label = NULL #paste("Significant", rank_level) #, "of antigen library", sep = " ")
+                                   )
+      print(p_taxa$boxplot)
+      #ggsave(paste("plots/prevalencePlots/ratioBoxPlot-",group_col,"-", comp_name,".pdf",sep =""), plot = p_taxa$boxplot, width = 4, height = 6, device = "pdf")
+
+
+    }
+  }
+}
+```
+
+
+
+
+```{r}
+
+# MSA Cross-reactive antibody responses
+
+#Explore if there are peptide subgroups bound by antibodies disproportionally in patients and controls and that share common sequences
+
+## Controls vs HCC {.tabset}
+
+# aa_seq = readRDS("../../phipseq_report-generator/library_meta/aa_seq_allLibraries.rds")
+# 
+# group_col <- "group_test"
+# comp_name <- names(comparison_group_tests[[group_col]])[2]
+# groups        <- strsplit(comp_name, "_vs_")[[1]]
+# group1        <- groups[1]
+# group2        <- groups[2]
+# comparison_df <- comparison_group_tests[[group_col]][[comp_name]]$comparison_df
+# 
+# flags <- names(significant_taxa_list[[comp_name]]$flags_to_patterns)
+# for(flag in flags){
+#   patterns <- significant_taxa_list[[comp_name]]$flags_to_patterns[[flag]]
+#   comparison_df <- comparison_df %>%
+#     add_flag_by_patterns(
+#       new_flag    = flag,
+#       patterns    = patterns,
+#       target_cols = c("class", "order", "family", "genus", "species", "Description")
+#     )
+# }
+# 
+# comparison_df <- comparison_df %>%
+#   left_join(aa_seq, by = "Peptide")
+```
+
+
+```{r, fig.height=4, fig.width=10}
+
+### Bacteriodales
+
+#Ratio > 1.5 and pval < 0.001
+
+# flag <- "Bacteriodales"
+# p <- make_flagged_msa_plot(df = comparison_df, flag = flag,
+#                            log2_ratio_cut  = 1.5, pval_cut = 0.001, 
+#                            seq_length = 64,
+#                            #coords = c(18, 72),
+#                            msa_method = "Muscle", msa_type = "protein", msa_font = "TimesNewRoman",
+#                            msa_color_scheme = "Chemistry_AA", msa_char_width  = 0.6)
+# print(p)
+```
+
+
+
+
+

@@ -1,2 +1,1 @@
-# HCC-MUW
-HCC-MUW project 
+HCC-MUW project

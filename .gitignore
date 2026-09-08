@@ -1,1 +1,36 @@
-*.pkl
+$# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+conda_envs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data / models
+data/
+outputs/
+models/
+*.parquet
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# Packaging output
+build/
+dist/
+*.egg-info/
+*.idea/
