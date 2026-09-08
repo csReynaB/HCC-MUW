@@ -1,0 +1,23 @@
+cff-version: 4.2.0
+message: "If you use phipsurv in your research, please cite it using the metadata below."
+
+title: "phipsurv: Survival modelling and biomarker analysis for PhIP-seq data"
+
+authors:
+  - family-names: "Reyna-Blanco"
+    given-names: "Carlos S."
+    orcid: "https://orcid.org/0000-0002-7104-1446"
+
+version: 4.2.0
+date-released: "2026-08-21"
+
+repository-code: "https://github.com/csReynaB/phipsurv"
+
+license: MIT
+
+keywords:
+  - PhIP-seq
+  - machine learning
+  - bioinformatics
+  - survival analysis
+  - SHAP
