@@ -47,7 +47,11 @@ Within each analysis module:
 
 ## Citation
 
-If you use this repository, please cite the associated manuscript. The complete journal citation and DOI will be added once the article is published.
+If you use the code or data in this repository, please cite the archived release:
+
+> Reyna-Blanco, C. S. (2026). *csReynaB/HCC-MUW: HCC-MUW* (v1.0.0). Zenodo. https://doi.org/10.5281/zenodo.22656008
+
+Please also cite the associated manuscript. Its complete journal citation will be added once the article is published.
 
 Software-specific citation metadata for `phipml` and `phipsurv` are provided in the corresponding `CITATION.cff` files.
 
